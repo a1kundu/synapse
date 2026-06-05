@@ -7,13 +7,13 @@ import kotlinx.serialization.Serializable
  * Represents an available app update from GitHub Releases.
  */
 data class AppUpdate(
-    val versionName: String,
     val buildNumber: Int,
+    val version: String,
+    val tagName: String,
     val downloadUrl: String,
     val fileSize: Long,
-    val changelog: String,
-    val tagName: String,
     val releaseName: String,
+    val changelog: String,
 )
 
 /**
@@ -25,8 +25,10 @@ sealed class DownloadState {
         val progress: Float,
         val downloadedBytes: Long,
         val totalBytes: Long,
-        val speedBytesPerSec: Long = 0,
+        val speedFormatted: String = "",
+        val remainingFormatted: String = "",
     ) : DownloadState()
+
     data class Completed(val filePath: String) : DownloadState()
     data class Failed(val error: String) : DownloadState()
     data object Cancelled : DownloadState()
@@ -51,30 +53,23 @@ data class GitHubAsset(
     @SerialName("browser_download_url") val browserDownloadUrl: String,
 )
 
-/**
- * Update service for checking and downloading updates from GitHub Releases.
- * Platform-specific implementations handle the actual download and install.
- */
-expect class UpdateService() {
-    /**
-     * Check GitHub releases for a newer version.
-     * Returns null if no update is available.
-     */
-    suspend fun checkForUpdate(): AppUpdate?
+// ---------------------------------------------------------------------------
+// Formatting utilities
+// ---------------------------------------------------------------------------
 
-    /**
-     * Download the update APK. Only meaningful on Android.
-     * Emits download progress via the state flow.
-     */
-    suspend fun downloadUpdate(update: AppUpdate, onStateChange: (DownloadState) -> Unit)
+/** Format bytes as human-readable string (e.g., "12.5 MB"). */
+fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_000_000 -> "${(bytes / (1024.0 * 1024.0)).fmt1()} MB"
+    bytes >= 1_000 -> "${(bytes / 1024.0).fmt1()} KB"
+    else -> "$bytes B"
+}
 
-    /**
-     * Install a downloaded APK. Only meaningful on Android.
-     */
-    suspend fun installUpdate(filePath: String)
-
-    /**
-     * Cancel an ongoing download.
-     */
-    fun cancelDownload()
+/** Format a Double to 1 decimal place (multiplatform-safe, no String.format). */
+internal fun Double.fmt1(): String {
+    val abs = kotlin.math.abs(this)
+    val rounded = kotlin.math.round(abs * 10).toLong()
+    val intPart = rounded / 10
+    val fracPart = rounded % 10
+    val sign = if (this < 0) "-" else ""
+    return "$sign$intPart.$fracPart"
 }

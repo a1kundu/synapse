@@ -21,18 +21,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import `in`.arijitk.synapse.APP_VERSION
+import `in`.arijitk.synapse.LocalSnackbarHostState
+import `in`.arijitk.synapse.UpdateDialogController
 import `in`.arijitk.synapse.isAndroid
 import `in`.arijitk.synapse.isDebug
+import `in`.arijitk.synapse.openUrl
 import `in`.arijitk.synapse.settings.SettingsRepository
 import `in`.arijitk.synapse.theme.ThemeMode
 import `in`.arijitk.synapse.theme.ThemeSettings
-import `in`.arijitk.synapse.update.AppUpdate
-import `in`.arijitk.synapse.update.DownloadState
-import `in`.arijitk.synapse.update.UpdateService
+import `in`.arijitk.synapse.update.UpdateChecker
 import kotlinx.coroutines.launch
 
 /**
- * Settings screen with appearance, updates, and about sections.
+ * Settings screen matching the Flutter SettingsScreen feature-for-feature.
+ * Sections: App info, Appearance, Updates (Android only), GitHub.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,18 +42,13 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
 ) {
     val settings = remember { SettingsRepository.instance }
-    val updateService = remember { UpdateService() }
     val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = LocalSnackbarHostState.current
 
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     var dynamicColor by remember { mutableStateOf(settings.dynamicColorEnabled) }
     var autoUpdate by remember { mutableStateOf(settings.autoUpdateCheckEnabled) }
-
-    // Update check state
     var isCheckingUpdate by remember { mutableStateOf(false) }
-    var updateAvailable by remember { mutableStateOf<AppUpdate?>(null) }
-    var updateError by remember { mutableStateOf<String?>(null) }
-    var downloadState by remember { mutableStateOf<DownloadState>(DownloadState.Idle) }
 
     Scaffold(
         topBar = {
@@ -71,137 +68,290 @@ fun SettingsScreen(
             )
         },
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter,
         ) {
-            Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 600.dp)
+                    .fillMaxHeight()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // ── App Info ────────────────────────────────────────────
+                AppInfoHeader()
 
-            // App Info Section
-            AppInfoCard()
+                Spacer(Modifier.height(8.dp))
 
-            // Appearance Section
-            SectionHeader("Appearance")
-            AppearanceSection(
-                themeMode = themeMode,
-                dynamicColor = dynamicColor,
-                onThemeModeChange = { mode ->
-                    themeMode = mode
-                    settings.themeMode = mode
-                },
-                onDynamicColorChange = { enabled ->
-                    dynamicColor = enabled
-                    settings.dynamicColorEnabled = enabled
-                },
-            )
+                // ── Appearance ──────────────────────────────────────────
+                SectionHeader("Appearance")
 
-            // Updates Section (Android only)
-            if (isAndroid) {
-                SectionHeader("Updates")
-                UpdatesSection(
-                    autoUpdate = autoUpdate,
-                    isChecking = isCheckingUpdate,
-                    updateAvailable = updateAvailable,
-                    updateError = updateError,
-                    downloadState = downloadState,
-                    onAutoUpdateChange = { enabled ->
-                        autoUpdate = enabled
-                        settings.autoUpdateCheckEnabled = enabled
-                    },
-                    onCheckForUpdate = {
-                        coroutineScope.launch {
-                            isCheckingUpdate = true
-                            updateError = null
-                            try {
-                                updateAvailable = updateService.checkForUpdate()
-                                if (updateAvailable == null) {
-                                    updateError = "You're on the latest version"
-                                }
-                            } catch (e: Exception) {
-                                updateError = e.message ?: "Failed to check for updates"
-                            } finally {
-                                isCheckingUpdate = false
-                            }
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        ThemeTile(
+                            icon = Icons.Outlined.BrightnessAuto,
+                            title = "System",
+                            subtitle = "Follow device theme",
+                            selected = themeMode == ThemeMode.SYSTEM,
+                            onClick = {
+                                themeMode = ThemeMode.SYSTEM
+                                settings.themeMode = ThemeMode.SYSTEM
+                            },
+                        )
+                        ThemeTile(
+                            icon = Icons.Outlined.LightMode,
+                            title = "Light",
+                            subtitle = "Always use light theme",
+                            selected = themeMode == ThemeMode.LIGHT,
+                            onClick = {
+                                themeMode = ThemeMode.LIGHT
+                                settings.themeMode = ThemeMode.LIGHT
+                            },
+                        )
+                        ThemeTile(
+                            icon = Icons.Outlined.DarkMode,
+                            title = "Dark",
+                            subtitle = "Always use dark theme",
+                            selected = themeMode == ThemeMode.DARK,
+                            onClick = {
+                                themeMode = ThemeMode.DARK
+                                settings.themeMode = ThemeMode.DARK
+                            },
+                        )
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("Dynamic color") },
+                        supportingContent = { Text("Use wallpaper colors (Android 12+)") },
+                        leadingContent = {
+                            IconBox(
+                                icon = Icons.Outlined.Palette,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = dynamicColor,
+                                onCheckedChange = {
+                                    dynamicColor = it
+                                    settings.dynamicColorEnabled = it
+                                },
+                            )
+                        },
+                        modifier = Modifier.clickable {
+                            dynamicColor = !dynamicColor
+                            settings.dynamicColorEnabled = dynamicColor
+                        },
+                    )
+                }
+
+                // ── Updates (Android only) ──────────────────────────────
+                if (isAndroid) {
+                    Spacer(Modifier.height(8.dp))
+                    SectionHeader("Updates")
+
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column {
+                            ListItem(
+                                headlineContent = { Text("Automatic update check") },
+                                supportingContent = {
+                                    Text("Check for updates when the app opens or using background updates.")
+                                },
+                                leadingContent = {
+                                    IconBox(
+                                        icon = Icons.Outlined.Update,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = autoUpdate,
+                                        onCheckedChange = {
+                                            autoUpdate = it
+                                            settings.autoUpdateCheckEnabled = it
+                                        },
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    autoUpdate = !autoUpdate
+                                    settings.autoUpdateCheckEnabled = autoUpdate
+                                },
+                            )
+
+                            ListItem(
+                                headlineContent = { Text("Check for updates") },
+                                supportingContent = { Text("Channel: ${UpdateChecker.channel}") },
+                                leadingContent = {
+                                    IconBox(
+                                        icon = Icons.Outlined.SystemUpdate,
+                                        color = MaterialTheme.colorScheme.secondary,
+                                    )
+                                },
+                                trailingContent = {
+                                    Icon(
+                                        Icons.Filled.ChevronRight,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                modifier = Modifier.clickable(enabled = !isCheckingUpdate) {
+                                    coroutineScope.launch {
+                                        isCheckingUpdate = true
+                                        val update = UpdateChecker.checkForUpdate()
+                                        isCheckingUpdate = false
+
+                                        if (update != null) {
+                                            UpdateDialogController.pendingUpdate = update
+                                            UpdateDialogController.showUpdateDialog = true
+                                        } else {
+                                            snackbarHostState.showSnackbar(
+                                                "You're already on the latest version."
+                                            )
+                                        }
+                                    }
+                                },
+                            )
                         }
-                    },
-                    onDownloadUpdate = { update ->
-                        coroutineScope.launch {
-                            updateService.downloadUpdate(update) { state ->
-                                downloadState = state
-                            }
-                        }
-                    },
-                    onInstallUpdate = { filePath ->
-                        coroutineScope.launch {
-                            updateService.installUpdate(filePath)
-                        }
-                    },
-                    onCancelDownload = {
-                        updateService.cancelDownload()
-                    },
-                )
+                    }
+                }
+
+                // ── GitHub ──────────────────────────────────────────────
+                Spacer(Modifier.height(8.dp))
+                SectionHeader("GitHub")
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        GitHubLinkItem(
+                            icon = Icons.Outlined.Code,
+                            title = "Source Code",
+                            subtitle = "a1kundu/synapse",
+                            url = "https://github.com/a1kundu/synapse",
+                        )
+                        GitHubLinkItem(
+                            icon = Icons.Outlined.BugReport,
+                            title = "Report an Issue",
+                            subtitle = "Bugs & feature requests",
+                            url = "https://github.com/a1kundu/synapse/issues",
+                        )
+                        GitHubLinkItem(
+                            icon = Icons.Outlined.NewReleases,
+                            title = "Releases",
+                            subtitle = "Download latest versions",
+                            url = "https://github.com/a1kundu/synapse/releases",
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
             }
 
-            // GitHub Section
-            SectionHeader("GitHub")
-            GitHubSection()
-
-            Spacer(Modifier.height(24.dp))
+            // Full-screen checking spinner overlay
+            if (isCheckingUpdate) {
+                CheckingUpdateOverlay()
+            }
         }
     }
 }
 
+// ── App Info Header ─────────────────────────────────────────────────────────
+
 @Composable
-private fun AppInfoCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
+private fun AppInfoHeader() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                .size(80.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center,
         ) {
+            Icon(
+                imageVector = Icons.Filled.Hub,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(44.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Synapse",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(4.dp))
+        val version = if (APP_VERSION == "APP_VERSION_PLACEHOLDER") "dev" else "v$APP_VERSION"
+        val channel = UpdateChecker.channel
+        Text(
+            text = "$version ($channel)",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+// ── Theme Tile (matching Flutter's _ThemeTile) ──────────────────────────────
+
+@Composable
+private fun ThemeTile(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    ListItem(
+        headlineContent = {
+            Text(
+                text = title,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) cs.primary else Color.Unspecified,
+            )
+        },
+        supportingContent = { Text(subtitle) },
+        leadingContent = {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary),
+                    .background(
+                        if (selected) cs.primaryContainer
+                        else cs.surfaceVariant,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Hub,
+                    imageVector = icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp),
+                    tint = if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
                 )
             }
-            Column {
-                Text(
-                    text = "Synapse",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                val version = if (APP_VERSION == "APP_VERSION_PLACEHOLDER") "dev" else APP_VERSION
-                val channel = if (isDebug) "debug" else "release"
-                Text(
-                    text = "v$version ($channel)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+        },
+        trailingContent = {
+            if (selected) {
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = cs.primary,
                 )
             }
-        }
-    }
+        },
+        modifier = Modifier.clickable(onClick = onClick),
+    )
 }
+
+// ── Section Header ──────────────────────────────────────────────────────────
 
 @Composable
 private fun SectionHeader(title: String) {
@@ -210,265 +360,11 @@ private fun SectionHeader(title: String) {
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+        modifier = Modifier.padding(start = 4.dp),
     )
 }
 
-@Composable
-private fun AppearanceSection(
-    themeMode: ThemeMode,
-    dynamicColor: Boolean,
-    onThemeModeChange: (ThemeMode) -> Unit,
-    onDynamicColorChange: (Boolean) -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            // Theme mode options
-            ThemeMode.entries.forEach { mode ->
-                val icon = when (mode) {
-                    ThemeMode.SYSTEM -> Icons.Outlined.BrightnessAuto
-                    ThemeMode.LIGHT -> Icons.Outlined.LightMode
-                    ThemeMode.DARK -> Icons.Outlined.DarkMode
-                }
-                val label = when (mode) {
-                    ThemeMode.SYSTEM -> "System default"
-                    ThemeMode.LIGHT -> "Light"
-                    ThemeMode.DARK -> "Dark"
-                }
-
-                ListItem(
-                    headlineContent = { Text(label) },
-                    leadingContent = {
-                        IconBox(
-                            icon = icon,
-                            color = if (themeMode == mode)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    trailingContent = {
-                        RadioButton(
-                            selected = themeMode == mode,
-                            onClick = { onThemeModeChange(mode) },
-                        )
-                    },
-                    modifier = Modifier.clickable { onThemeModeChange(mode) },
-                )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // Dynamic color toggle
-            ListItem(
-                headlineContent = { Text("Dynamic color") },
-                supportingContent = { Text("Use wallpaper-based colors (Android 12+)") },
-                leadingContent = {
-                    IconBox(
-                        icon = Icons.Outlined.Palette,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                },
-                trailingContent = {
-                    Switch(
-                        checked = dynamicColor,
-                        onCheckedChange = onDynamicColorChange,
-                    )
-                },
-                modifier = Modifier.clickable { onDynamicColorChange(!dynamicColor) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun UpdatesSection(
-    autoUpdate: Boolean,
-    isChecking: Boolean,
-    updateAvailable: AppUpdate?,
-    updateError: String?,
-    downloadState: DownloadState,
-    onAutoUpdateChange: (Boolean) -> Unit,
-    onCheckForUpdate: () -> Unit,
-    onDownloadUpdate: (AppUpdate) -> Unit,
-    onInstallUpdate: (String) -> Unit,
-    onCancelDownload: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            // Auto-update toggle
-            ListItem(
-                headlineContent = { Text("Auto-check for updates") },
-                supportingContent = { Text("Periodically check for new versions") },
-                leadingContent = {
-                    IconBox(
-                        icon = Icons.Outlined.SystemUpdate,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                },
-                trailingContent = {
-                    Switch(
-                        checked = autoUpdate,
-                        onCheckedChange = onAutoUpdateChange,
-                    )
-                },
-                modifier = Modifier.clickable { onAutoUpdateChange(!autoUpdate) },
-            )
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // Manual check button
-            ListItem(
-                headlineContent = { Text("Check for updates") },
-                supportingContent = {
-                    when {
-                        isChecking -> Text("Checking...")
-                        updateAvailable != null -> Text("Update available: ${updateAvailable.versionName}")
-                        updateError != null -> Text(updateError)
-                        else -> {
-                            val channel = if (isDebug) "debug" else "release"
-                            Text("Channel: $channel")
-                        }
-                    }
-                },
-                leadingContent = {
-                    IconBox(
-                        icon = Icons.Outlined.Refresh,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                },
-                trailingContent = {
-                    if (isChecking) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                    }
-                },
-                modifier = Modifier.clickable(enabled = !isChecking) { onCheckForUpdate() },
-            )
-
-            // Download progress / install button
-            when (val state = downloadState) {
-                is DownloadState.Downloading -> {
-                    LinearProgressIndicator(
-                        progress = { state.progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                    Text(
-                        text = "${(state.progress * 100).toInt()}% - ${formatBytes(state.downloadedBytes)} / ${formatBytes(state.totalBytes)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
-                    TextButton(
-                        onClick = onCancelDownload,
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-                is DownloadState.Completed -> {
-                    ListItem(
-                        headlineContent = { Text("Download complete") },
-                        supportingContent = { Text("Tap to install") },
-                        leadingContent = {
-                            IconBox(
-                                icon = Icons.Filled.CheckCircle,
-                                color = Color(0xFF4CAF50),
-                            )
-                        },
-                        modifier = Modifier.clickable { onInstallUpdate(state.filePath) },
-                    )
-                }
-                is DownloadState.Failed -> {
-                    ListItem(
-                        headlineContent = { Text("Download failed") },
-                        supportingContent = { Text(state.error) },
-                        leadingContent = {
-                            IconBox(
-                                icon = Icons.Filled.Error,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        },
-                    )
-                }
-                else -> {
-                    // Show download button if update available
-                    if (updateAvailable != null) {
-                        FilledTonalButton(
-                            onClick = { onDownloadUpdate(updateAvailable) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        ) {
-                            Icon(Icons.Filled.Download, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Download & Install (${formatBytes(updateAvailable.fileSize)})")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GitHubSection() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            GitHubLinkItem(
-                icon = Icons.Outlined.Code,
-                title = "Source Code",
-                subtitle = "View project on GitHub",
-                color = MaterialTheme.colorScheme.primary,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            GitHubLinkItem(
-                icon = Icons.Outlined.BugReport,
-                title = "Issues",
-                subtitle = "Report bugs or request features",
-                color = MaterialTheme.colorScheme.error,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            GitHubLinkItem(
-                icon = Icons.Outlined.NewReleases,
-                title = "Releases",
-                subtitle = "View all releases and changelogs",
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-        }
-    }
-}
-
-@Composable
-private fun GitHubLinkItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    color: Color,
-) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(subtitle) },
-        leadingContent = { IconBox(icon = icon, color = color) },
-        trailingContent = {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                contentDescription = "Open",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        },
-        modifier = Modifier.clickable {
-            // TODO: Launch URL via platform-specific implementation
-        },
-    )
-}
+// ── Icon Box ────────────────────────────────────────────────────────────────
 
 @Composable
 private fun IconBox(
@@ -478,7 +374,7 @@ private fun IconBox(
     Box(
         modifier = Modifier
             .size(40.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(color.copy(alpha = 0.12f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -491,11 +387,47 @@ private fun IconBox(
     }
 }
 
-private fun formatBytes(bytes: Long): String {
-    return when {
-        bytes >= 1_000_000_000 -> "${(bytes / 100_000_000) / 10.0} GB"
-        bytes >= 1_000_000 -> "${(bytes / 100_000) / 10.0} MB"
-        bytes >= 1_000 -> "${(bytes / 100) / 10.0} KB"
-        else -> "$bytes B"
+// ── GitHub Link Item ────────────────────────────────────────────────────────
+
+@Composable
+private fun GitHubLinkItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    url: String,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle) },
+        leadingContent = {
+            IconBox(
+                icon = icon,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        },
+        trailingContent = {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = "Open",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        },
+        modifier = Modifier.clickable { openUrl(url) },
+    )
+}
+
+// ── Checking Update Overlay (matches Flutter's fullscreen spinner) ──────────
+
+@Composable
+private fun CheckingUpdateOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.3f))
+            .clickable(enabled = false) {},
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator()
     }
 }

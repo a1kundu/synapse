@@ -14,3 +14,8 @@ expect val isAndroid: Boolean
  * Whether the app is running in debug mode.
  */
 expect val isDebug: Boolean
+
+/**
+ * Open a URL in the system browser.
+ */
+expect fun openUrl(url: String)
