@@ -22,7 +22,7 @@ import kotlin.coroutines.cancellation.CancellationException
  */
 actual class UpdateService actual constructor() {
 
-    private val repoOwner = "OWNER"  // TODO: Set your GitHub username/org
+    private val repoOwner = "a1kundu"  // TODO: Set your GitHub username/org
     private val repoName = "synapse" // TODO: Set your repo name
 
     private val json = Json {
