@@ -126,6 +126,16 @@ fun App() {
 private fun GlobalUpdateDialogs() {
     val update = UpdateDialogController.pendingUpdate
 
+    // When the download dialog opens, dismiss the update dialog behind it
+    // on the next frame to avoid a visual bump from two platform windows
+    // being destroyed and created simultaneously.
+    val showDownload = UpdateDialogController.showDownloadDialog && update != null
+    LaunchedEffect(showDownload) {
+        if (showDownload) {
+            UpdateDialogController.showUpdateDialog = false
+        }
+    }
+
     // Update available dialog
     if (UpdateDialogController.showUpdateDialog && update != null) {
         UpdateDialog(
@@ -134,10 +144,11 @@ private fun GlobalUpdateDialogs() {
                 UpdateDialogController.showUpdateDialog = false
             },
             onDownload = {
-                UpdateDialogController.showUpdateDialog = false
                 // Clear any stale state (Cancelled/Completed/Failed) from
                 // a previous download so the new dialog doesn't race-dismiss.
                 DownloadManager.reset()
+                // Show download dialog on top; the LaunchedEffect above will
+                // dismiss this dialog behind it on the next frame.
                 UpdateDialogController.showDownloadDialog = true
             },
             onDisableAutoUpdate = {
@@ -147,9 +158,9 @@ private fun GlobalUpdateDialogs() {
     }
 
     // Download progress dialog
-    if (UpdateDialogController.showDownloadDialog && update != null) {
+    if (showDownload) {
         DownloadProgressDialog(
-            update = update,
+            update = update!!,
             onDismiss = {
                 UpdateDialogController.showDownloadDialog = false
             },
