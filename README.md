@@ -4,7 +4,12 @@ A **Kotlin Multiplatform (KMP)** application built with **Compose Multiplatform 
 
 ## Overview
 
-Synapse demonstrates a modern multiplatform architecture where UI and business logic are shared across platforms using Jetpack Compose. The project leverages Kotlin Multiplatform to maximize code reuse while allowing platform-specific implementations where needed.
+Synapse is a multiplatform application skeleton demonstrating:
+- Shared UI with Compose Multiplatform
+- Adaptive theming with Material You / Dynamic Color support
+- GitHub Releases-based self-update mechanism for Android
+- CI/CD pipeline with automated APK builds and releases
+- Platform-specific implementations via expect/actual pattern
 
 ## Tech Stack
 
@@ -17,11 +22,16 @@ Synapse demonstrates a modern multiplatform architecture where UI and business l
 | Material3 | (via CMP) | Design system |
 | Navigation Compose | 2.8.0-alpha11 | Multiplatform navigation |
 | Lifecycle ViewModel | 2.8.4 | Multiplatform lifecycle-aware components |
+| Ktor Client | 3.0.3 | HTTP client (update checks) |
+| Kotlinx Serialization | 1.7.3 | JSON parsing |
 
 ## Project Structure
 
 ```
 SynapseKT/
+├── .github/
+│   └── workflows/
+│       └── build-apk.yml                  # CI/CD: Build & Release APK
 ├── build.gradle.kts                        # Root build configuration
 ├── settings.gradle.kts                     # Project settings & repository config
 ├── gradle.properties                       # JVM args, Android & Kotlin settings
@@ -31,28 +41,83 @@ SynapseKT/
 └── composeApp/                             # Main application module
     ├── build.gradle.kts                    # Module build config (Android + WasmJs)
     └── src/
-        ├── commonMain/                     # Shared code (all platforms)
-        │   └── kotlin/in/arijitk/synapse/
-        │       ├── App.kt                  # Root composable with shared UI
-        │       └── Theme.kt               # Material3 theme (light & dark)
-        ├── androidMain/                    # Android-specific code
-        │   ├── AndroidManifest.xml
+        ├── commonMain/kotlin/in/arijitk/synapse/
+        │   ├── App.kt                      # Root composable + navigation graph
+        │   ├── Platform.kt                 # expect declarations (platform ID)
+        │   ├── Version.kt                  # App version (stamped by CI)
+        │   ├── navigation/
+        │   │   └── Routes.kt              # Navigation route definitions
+        │   ├── theme/
+        │   │   ├── SynapseTheme.kt        # Adaptive theme (light/dark/dynamic)
+        │   │   └── AppColors.kt           # Color palette definitions
+        │   ├── settings/
+        │   │   └── SettingsRepository.kt  # Settings persistence (expect/actual)
+        │   ├── update/
+        │   │   └── UpdateService.kt       # Update models + expect service
+        │   └── ui/
+        │       ├── home/
+        │       │   └── HomeShell.kt       # Bottom nav shell (Teams + Search tabs)
+        │       └── settings/
+        │           └── SettingsScreen.kt  # Full settings UI
+        ├── androidMain/
+        │   ├── AndroidManifest.xml         # Permissions + FileProvider
+        │   ├── res/xml/file_paths.xml      # FileProvider paths for APK install
         │   └── kotlin/in/arijitk/synapse/
         │       ├── MainActivity.kt         # Android entry point
-        │       └── Platform.android.kt     # Platform name provider
-        └── wasmJsMain/                     # Web (Wasm) specific code
+        │       ├── Platform.android.kt     # actual: platform identification
+        │       ├── theme/
+        │       │   └── DynamicColor.android.kt  # Material You dynamic colors
+        │       ├── settings/
+        │       │   └── PlatformPreferences.android.kt  # SharedPreferences
+        │       └── update/
+        │           └── UpdateService.android.kt  # GitHub download + APK install
+        └── wasmJsMain/
             ├── resources/
             │   └── index.html              # HTML shell for the web app
             └── kotlin/in/arijitk/synapse/
                 ├── main.kt                 # Web entry point
-                └── Platform.wasmJs.kt      # Platform name provider
+                ├── Platform.wasmJs.kt      # actual: platform identification
+                ├── theme/
+                │   └── DynamicColor.wasmJs.kt  # No dynamic color on web
+                ├── settings/
+                │   └── PlatformPreferences.wasmJs.kt  # localStorage
+                └── update/
+                    └── UpdateService.wasmJs.kt  # No-op (web always fresh)
 ```
 
-### Source Sets
+## Features
 
-- **`commonMain`** -- Contains all shared UI components, themes, and business logic. This is where the majority of the application code lives. Uses `expect`/`actual` declarations for platform-specific functionality.
-- **`androidMain`** -- Android-specific implementations including `MainActivity`, `AndroidManifest.xml`, and the `actual` platform declarations.
-- **`wasmJsMain`** -- Web (WebAssembly) specific entry point and platform declarations. Uses Kotlin/Wasm to compile Compose UI to run natively in the browser.
+### Home Shell
+- Bottom navigation bar with swipeable pages (HorizontalPager)
+- Two tabs: **Teams** and **Search** (placeholder content for business logic)
+- Top app bar with settings navigation
+
+### Settings
+- **App Info** -- Version display, build channel (debug/release)
+- **Appearance** -- Theme mode (System/Light/Dark), Dynamic color toggle
+- **Updates** (Android only) -- Auto-update toggle, manual check, download progress with speed/ETA, install
+- **GitHub** -- Links to source code, issues, releases
+
+### Adaptive Theming
+- **Material You** -- Uses Android 12+ dynamic color schemes from wallpaper
+- **Fallback** -- Deep Purple seed-based Material3 color scheme
+- **Dark mode** -- Full dark theme support with system/manual toggle
+- **Persistence** -- Theme preferences stored across app restarts
+
+### Update Mechanism (Android)
+- Checks GitHub Releases API for newer versions
+- Channel-based filtering (debug/release builds check their own channel)
+- Version comparison via build number from git commit count
+- HTTP Range resume support for interrupted downloads
+- APK installation via FileProvider (Android 7+)
+- Cancel/retry support with progress reporting
+
+### CI/CD Pipeline
+- Triggered on push to `main` or manual dispatch
+- Version stamping from git metadata (`{commitCount}.0.0-{shortSha}`)
+- Keystore decoding from GitHub secrets for release signing
+- Auto-generated changelog from git log
+- Creates GitHub Release with tagged APK
 
 ## Prerequisites
 
@@ -73,47 +138,41 @@ cd SynapseKT
 
 ### Build & Run Android
 
-Build the debug APK:
-
 ```bash
 ./gradlew :composeApp:assembleDebug
-```
-
-The APK will be at `composeApp/build/outputs/apk/debug/composeApp-debug.apk`.
-
-Install on a connected device/emulator:
-
-```bash
 ./gradlew :composeApp:installDebug
 ```
 
 ### Build & Run Web (Wasm)
 
-Start the development server with hot reload:
-
 ```bash
 ./gradlew :composeApp:wasmJsBrowserDevelopmentRun
 ```
 
-This opens the app in your default browser at `http://localhost:8080`.
+Opens at `http://localhost:8080`.
 
-For a production build:
+### Production Builds
 
 ```bash
+# Android release APK
+./gradlew :composeApp:assembleRelease
+
+# Web production bundle
 ./gradlew :composeApp:wasmJsBrowserProductionWebpack
 ```
 
-Output is generated in `composeApp/build/dist/wasmJs/productionExecutable/`.
+## CI/CD Setup
 
-## Architecture
+To enable the GitHub Actions pipeline, configure these repository secrets:
 
-The project follows Compose Multiplatform conventions:
+| Secret | Description |
+|---|---|
+| `KEYSTORE_BASE64` | Base64-encoded release keystore (.jks) |
+| `KEYSTORE_PASSWORD` | Keystore password |
+| `KEY_ALIAS` | Signing key alias |
+| `KEY_PASSWORD` | Signing key password |
 
-1. **Shared UI Layer** (`commonMain`) -- All composables, themes, and navigation are defined once and shared across all targets.
-2. **Platform Binding** (`androidMain`, `wasmJsMain`) -- Each platform provides an entry point that bootstraps the shared `App()` composable:
-   - Android: `MainActivity` uses `setContent { App() }`
-   - Web: `ComposeViewport(document.body!!) { App() }`
-3. **Expect/Actual** -- Platform-specific behavior (e.g., `getPlatformName()`) is declared with `expect` in common code and implemented with `actual` in each platform source set.
+The pipeline auto-creates GitHub Releases with tagged APKs on every push to `main`.
 
 ## Configuration
 
@@ -136,18 +195,14 @@ The project follows Compose Multiplatform conventions:
 | Output file | `synapse.js` |
 | Target | Kotlin/Wasm (browser) |
 
-## Useful Gradle Tasks
+## Extending the Skeleton
 
-| Task | Description |
-|---|---|
-| `./gradlew :composeApp:assembleDebug` | Build Android debug APK |
-| `./gradlew :composeApp:assembleRelease` | Build Android release APK |
-| `./gradlew :composeApp:installDebug` | Install debug APK on device |
-| `./gradlew :composeApp:wasmJsBrowserDevelopmentRun` | Run web app (dev server) |
-| `./gradlew :composeApp:wasmJsBrowserProductionWebpack` | Production web build |
-| `./gradlew :composeApp:compileKotlinWasmJs` | Compile Wasm target only |
-| `./gradlew :composeApp:compileDebugKotlinAndroid` | Compile Android target only |
-| `./gradlew clean` | Clean all build outputs |
+To add business logic:
+1. Add new screens under `ui/` in `commonMain`
+2. Register routes in `navigation/Routes.kt`
+3. Add NavHost entries in `App.kt`
+4. Use `expect`/`actual` for platform-specific behavior
+5. Add dependencies to `gradle/libs.versions.toml`
 
 ## License
 
