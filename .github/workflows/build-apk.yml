@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      BUILD_TYPE: ${{ github.event.inputs.build_type || 'debug' }}
+      BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
 
     steps:
       - name: Checkout
@@ -91,19 +91,19 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "$EOF" >> $GITHUB_OUTPUT
 
-      - name: Build debug APK
-        if: env.BUILD_TYPE == 'debug'
+      - name: Build APK (${{ env.BUILD_TYPE }})
         run: |
-          ./gradlew :composeApp:assembleDebug \
-            -Pandroid.injected.version.code=${{ steps.meta.outputs.build_number }} \
-            -Pandroid.injected.version.name="${{ steps.meta.outputs.build_number }}.0.0-${{ steps.meta.outputs.sha_short }}"
-
-      - name: Build release APK
-        if: env.BUILD_TYPE == 'release'
-        run: |
-          ./gradlew :composeApp:assembleRelease \
-            -Pandroid.injected.version.code=${{ steps.meta.outputs.build_number }} \
-            -Pandroid.injected.version.name="${{ steps.meta.outputs.build_number }}.0.0-${{ steps.meta.outputs.sha_short }}"
+          VERSION="${{ steps.meta.outputs.build_number }}.0.0-${{ steps.meta.outputs.sha_short }}"
+          BUILD_NUM="${{ steps.meta.outputs.build_number }}"
+          if [ "${{ env.BUILD_TYPE }}" = "release" ]; then
+            ./gradlew :composeApp:assembleRelease \
+              -Pandroid.injected.version.code="$BUILD_NUM" \
+              -Pandroid.injected.version.name="$VERSION"
+          else
+            ./gradlew :composeApp:assembleDebug \
+              -Pandroid.injected.version.code="$BUILD_NUM" \
+              -Pandroid.injected.version.name="$VERSION"
+          fi
 
       - name: Rename APK
         id: apk
@@ -130,17 +130,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.meta.outputs.build_number }}-${{ env.BUILD_TYPE }}-${{ steps.meta.outputs.sha_short }}
-          name: "Build #${{ steps.meta.outputs.build_number }} - Synapse (${{ env.BUILD_TYPE }})"
+          name: "Build #${{ steps.meta.outputs.build_number }} — Synapse (${{ env.BUILD_TYPE }})"
           body: |
-            ## Build Information
-            - **Version:** ${{ steps.meta.outputs.build_number }}.0.0-${{ steps.meta.outputs.sha_short }}
-            - **Build Number:** ${{ steps.meta.outputs.build_number }}
-            - **Channel:** ${{ env.BUILD_TYPE }}
-            - **Commit:** ${{ github.sha }}
+            **${{ env.BUILD_TYPE }}** APK built from commit `${{ github.sha }}`
+            Version: `${{ steps.meta.outputs.build_number }}.0.0-${{ steps.meta.outputs.sha_short }}` (code: ${{ steps.meta.outputs.build_number }})
+            Branch: `${{ github.ref_name }}`
+            Triggered by: `${{ github.actor }}`
 
-            ## Changelog
+            ### Changelog
             ${{ steps.changelog.outputs.changelog }}
           files: ${{ steps.apk.outputs.apk_path }}
-          prerelease: ${{ env.BUILD_TYPE == 'debug' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
