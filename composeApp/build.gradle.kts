@@ -122,6 +122,7 @@ android {
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "Synapse Debug")
             signingConfig = if (keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -130,6 +131,7 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = false
+            resValue("string", "app_name", "Synapse")
             signingConfig = if (keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
