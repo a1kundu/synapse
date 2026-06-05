@@ -56,7 +56,11 @@ SynapseKT/
         │   │   └── UpdateService.kt       # Update models + expect service
         │   └── ui/
         │       ├── home/
-        │       │   └── HomeShell.kt       # Bottom nav shell (Teams + Search tabs)
+        │       │   └── HomeShell.kt       # Bottom nav shell (Chat + Search tabs)
+        │       ├── chat/
+        │       │   ├── ChatModels.kt      # Chat data models (messages, attachments, models)
+        │       │   ├── ChatViewModel.kt   # Chat state management
+        │       │   └── ChatScreen.kt      # Chat UI composable
         │       └── settings/
         │           └── SettingsScreen.kt  # Full settings UI
         ├── androidMain/
@@ -89,7 +93,8 @@ SynapseKT/
 
 ### Home Shell
 - Bottom navigation bar with swipeable pages (HorizontalPager)
-- Two tabs: **Teams** and **Search** (placeholder content for business logic)
+- Two tabs: **Chat** and **Search**
+- **Chat tab**: Full LLM chat interface with message bubbles, streaming responses, file attachments, and model selection
 - Top app bar with settings navigation
 
 ### Settings
