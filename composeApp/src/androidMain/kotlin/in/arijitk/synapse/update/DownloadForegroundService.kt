@@ -99,7 +99,7 @@ class DownloadForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Downloading update${if (version.isNotEmpty()) " v$version" else ""}")
             .setContentText("Starting download\u2026")
-            .setSmallIcon(`in`.arijitk.synapse.R.drawable.ic_notification)
+            .setSmallIcon(`in`.arijitk.synapse.R.mipmap.ic_launcher_monochrome)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(100, 0, true) // indeterminate
