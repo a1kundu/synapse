@@ -135,6 +135,9 @@ private fun GlobalUpdateDialogs() {
             },
             onDownload = {
                 UpdateDialogController.showUpdateDialog = false
+                // Clear any stale state (Cancelled/Completed/Failed) from
+                // a previous download so the new dialog doesn't race-dismiss.
+                DownloadManager.reset()
                 UpdateDialogController.showDownloadDialog = true
             },
             onDisableAutoUpdate = {

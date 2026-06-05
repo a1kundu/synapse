@@ -34,36 +34,35 @@ fun DownloadProgressDialog(
     val dm = DownloadManager
     val state by dm.state.collectAsState()
 
-    // Start download if needed
+    // Track whether we've actually started/attached to a download from THIS
+    // dialog instance.  Prevents stale Cancelled/Completed state (left over
+    // from a previous operation) from racing the dialog closed before the
+    // new download has even begun.
+    var downloadActive by remember { mutableStateOf(false) }
+
+    // Start download or reattach to an existing one
     LaunchedEffect(update) {
-        when {
-            dm.isDownloading && dm.activeUpdate?.tagName == update.tagName -> {
-                // Reattach to existing download — just observe
-            }
-            dm.isCompleted -> {
-                // Already done, dismiss after brief delay
-                delay(300)
-                onDismiss()
-            }
-            dm.error != null -> {
-                // Error state — will be shown
-            }
-            else -> {
-                // Start new download
-                dm.reset()
-                dm.start(update)
-            }
+        if (dm.isDownloading && dm.activeUpdate?.tagName == update.tagName) {
+            // Reattach to an in-progress download — just observe
+            downloadActive = true
+        } else {
+            // Any other state (Idle, stale Completed/Failed/Cancelled) → start fresh
+            dm.reset()
+            dm.start(update)
+            downloadActive = true
         }
     }
 
-    // Auto-dismiss on completion
-    LaunchedEffect(state) {
-        if (state is DownloadState.Completed) {
-            delay(300)
-            onDismiss()
-        }
-        if (state is DownloadState.Cancelled) {
-            onDismiss()
+    // Auto-dismiss on terminal states, but ONLY after we've attached
+    LaunchedEffect(state, downloadActive) {
+        if (!downloadActive) return@LaunchedEffect
+        when (state) {
+            is DownloadState.Completed -> {
+                delay(300)
+                onDismiss()
+            }
+            is DownloadState.Cancelled -> onDismiss()
+            else -> { /* still in progress or idle → keep showing */ }
         }
     }
 
