@@ -1,5 +1,6 @@
 package `in`.arijitk.synapse.ui.settings
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,9 @@ import `in`.arijitk.synapse.theme.ThemeMode
 import `in`.arijitk.synapse.theme.ThemeSettings
 import `in`.arijitk.synapse.update.UpdateChecker
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.painterResource
+import synapse.composeapp.generated.resources.Res
+import synapse.composeapp.generated.resources.app_icon
 
 /**
  * Settings screen matching the Flutter SettingsScreen feature-for-feature.
@@ -268,20 +272,13 @@ private fun AppInfoHeader() {
             .padding(bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
+        Image(
+            painter = painterResource(Res.drawable.app_icon),
+            contentDescription = "Synapse",
             modifier = Modifier
                 .size(80.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.primary),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Hub,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(44.dp),
-            )
-        }
+                .clip(RoundedCornerShape(24.dp)),
+        )
         Spacer(Modifier.height(12.dp))
         Text(
             text = "Synapse",
