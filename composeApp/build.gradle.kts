@@ -122,13 +122,17 @@ android {
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".debug"
+            signingConfig = if (keyPropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         getByName("release") {
             isMinifyEnabled = false
             signingConfig = if (keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
-                // Fall back to debug signing when key.properties is absent
                 signingConfigs.getByName("debug")
             }
         }
