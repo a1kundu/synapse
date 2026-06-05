@@ -46,6 +46,9 @@ fun HomeShell(
                     ModelSelectorChip(
                         selectedModel = chatViewModel.selectedModel,
                         onModelSelected = chatViewModel::selectModel,
+                        models = chatViewModel.availableModels,
+                        isLoading = chatViewModel.isLoadingModels,
+                        onRefresh = chatViewModel::refreshModels,
                     )
                     Spacer(Modifier.width(8.dp))
                     IconButton(onClick = onNavigateToSettings) {

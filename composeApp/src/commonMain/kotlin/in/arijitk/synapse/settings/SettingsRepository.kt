@@ -16,6 +16,14 @@ expect class PlatformPreferences() {
 }
 
 /**
+ * Supported LLM API providers.
+ */
+enum class LlmProvider(val displayName: String, val defaultBaseUrl: String) {
+    OPENAI("OpenAI", "https://api.openai.com/v1"),
+    OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1"),
+}
+
+/**
  * Application settings repository.
  * Manages persistence of all user preferences.
  */
@@ -27,6 +35,9 @@ class SettingsRepository(
         private const val KEY_DYNAMIC_COLOR = "dynamic_color"
         private const val KEY_AUTO_UPDATE = "auto_update_check"
         private const val KEY_PENDING_UPDATE = "pending_update_json"
+        private const val KEY_LLM_PROVIDER = "llm_provider"
+        private const val KEY_LLM_API_KEY = "llm_api_key"
+        private const val KEY_LLM_SERVER_URL = "llm_server_url"
 
         private var _instance: SettingsRepository? = null
         val instance: SettingsRepository
@@ -62,6 +73,41 @@ class SettingsRepository(
         set(value) {
             prefs.putString(KEY_PENDING_UPDATE, value)
         }
+
+    // LLM provider
+    var llmProvider: LlmProvider
+        get() {
+            val stored = prefs.getString(KEY_LLM_PROVIDER, LlmProvider.OPENAI.name)
+            return try { LlmProvider.valueOf(stored) } catch (_: Exception) { LlmProvider.OPENAI }
+        }
+        set(value) {
+            prefs.putString(KEY_LLM_PROVIDER, value.name)
+        }
+
+    // LLM API key
+    var llmApiKey: String
+        get() = prefs.getString(KEY_LLM_API_KEY, "")
+        set(value) {
+            prefs.putString(KEY_LLM_API_KEY, value)
+        }
+
+    // LLM server URL (empty = use provider default)
+    var llmServerUrl: String
+        get() = prefs.getString(KEY_LLM_SERVER_URL, "")
+        set(value) {
+            prefs.putString(KEY_LLM_SERVER_URL, value)
+        }
+
+    /** Resolved base URL: custom if set, otherwise provider default. */
+    val resolvedBaseUrl: String
+        get() {
+            val custom = llmServerUrl.trim()
+            return if (custom.isNotEmpty()) custom.trimEnd('/') else llmProvider.defaultBaseUrl
+        }
+
+    /** Whether LLM is configured (has API key). */
+    val isLlmConfigured: Boolean
+        get() = llmApiKey.isNotBlank()
 
     /**
      * Load all persisted settings into runtime state.

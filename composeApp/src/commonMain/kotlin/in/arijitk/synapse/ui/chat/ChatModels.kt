@@ -10,23 +10,6 @@ data class LlmModel(
 )
 
 /**
- * Predefined list of available models.
- */
-object AvailableModels {
-    val models = listOf(
-        LlmModel("gpt-4o", "GPT-4o", "OpenAI"),
-        LlmModel("gpt-4o-mini", "GPT-4o Mini", "OpenAI"),
-        LlmModel("gpt-3.5-turbo", "GPT-3.5 Turbo", "OpenAI"),
-        LlmModel("claude-3.5-sonnet", "Claude 3.5 Sonnet", "Anthropic"),
-        LlmModel("claude-3-haiku", "Claude 3 Haiku", "Anthropic"),
-        LlmModel("gemini-1.5-pro", "Gemini 1.5 Pro", "Google"),
-        LlmModel("gemini-1.5-flash", "Gemini 1.5 Flash", "Google"),
-    )
-
-    val default = models.first()
-}
-
-/**
  * A file attachment on a chat message.
  */
 data class ChatAttachment(

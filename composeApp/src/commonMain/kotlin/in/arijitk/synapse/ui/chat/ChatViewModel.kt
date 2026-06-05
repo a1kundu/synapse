@@ -6,7 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.delay
+import `in`.arijitk.synapse.llm.ChatRequestMessage
+import `in`.arijitk.synapse.llm.LlmApiClient
+import `in`.arijitk.synapse.settings.SettingsRepository
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
@@ -19,11 +21,24 @@ class ChatViewModel : ViewModel() {
     /** Simple monotonic counter for ordering messages (UI-thread only). */
     private var messageCounter = 0L
 
+    private val apiClient = LlmApiClient()
+
     /** All messages in the current conversation. */
     val messages = mutableStateListOf<ChatMessage>()
 
     /** Currently selected LLM model. */
-    var selectedModel by mutableStateOf(AvailableModels.default)
+    var selectedModel by mutableStateOf<LlmModel?>(null)
+        private set
+
+    /** Dynamically fetched models list. */
+    val availableModels = mutableStateListOf<LlmModel>()
+
+    /** Whether models are being fetched. */
+    var isLoadingModels by mutableStateOf(false)
+        private set
+
+    /** Error from last model fetch attempt. */
+    var modelFetchError by mutableStateOf<String?>(null)
         private set
 
     /** Pending file attachments for the next message. */
@@ -36,12 +51,46 @@ class ChatViewModel : ViewModel() {
     /** Current text in the input field (managed here for clearing on send). */
     var inputText by mutableStateOf("")
 
+    init {
+        // Auto-fetch models if API key is configured
+        refreshModels()
+    }
+
     fun onInputTextChange(text: String) {
         inputText = text
     }
 
     fun selectModel(model: LlmModel) {
         selectedModel = model
+    }
+
+    /**
+     * Fetch models from the configured provider.
+     */
+    fun refreshModels() {
+        val settings = SettingsRepository.instance
+        if (!settings.isLlmConfigured) return
+
+        isLoadingModels = true
+        modelFetchError = null
+
+        viewModelScope.launch {
+            val result = apiClient.fetchModels()
+            result.onSuccess { models ->
+                if (models.isNotEmpty()) {
+                    availableModels.clear()
+                    availableModels.addAll(models)
+                    // If no model selected or current not in list, select first
+                    if (selectedModel == null || models.none { it.id == selectedModel?.id }) {
+                        selectedModel = models.first()
+                    }
+                }
+                modelFetchError = null
+            }.onFailure { error ->
+                modelFetchError = error.message
+            }
+            isLoadingModels = false
+        }
     }
 
     fun addAttachment(attachment: ChatAttachment) {
@@ -59,7 +108,7 @@ class ChatViewModel : ViewModel() {
     }
 
     /**
-     * Send a user message and trigger a simulated assistant response.
+     * Send a user message and get an LLM response.
      */
     fun sendMessage(text: String) {
         val trimmed = text.trim()
@@ -76,48 +125,99 @@ class ChatViewModel : ViewModel() {
         pendingAttachments.clear()
         inputText = ""
 
-        // Simulate assistant response
-        simulateResponse(trimmed)
+        generateResponse()
     }
 
-    private fun simulateResponse(userQuery: String) {
+    private fun generateResponse() {
+        val settings = SettingsRepository.instance
+
+        if (!settings.isLlmConfigured) {
+            // No API key — show a helpful message
+            val assistantId = generateId()
+            messages.add(
+                ChatMessage(
+                    id = assistantId,
+                    role = MessageRole.ASSISTANT,
+                    content = "⚠️ API key not configured. Go to Settings → LLM Provider to set your API key.",
+                    timestamp = nextTimestamp(),
+                    model = selectedModel,
+                    isStreaming = false,
+                )
+            )
+            return
+        }
+
         isGenerating = true
 
+        val currentModel = selectedModel
         val assistantId = generateId()
         val streamingMessage = ChatMessage(
             id = assistantId,
             role = MessageRole.ASSISTANT,
             content = "",
             timestamp = nextTimestamp(),
-            model = selectedModel,
+            model = currentModel,
             isStreaming = true,
         )
         messages.add(streamingMessage)
 
+        // Build conversation history for API
+        val conversationHistory = messages
+            .filter { it.id != assistantId }
+            .map { msg ->
+                ChatRequestMessage(
+                    role = when (msg.role) {
+                        MessageRole.USER -> "user"
+                        MessageRole.ASSISTANT -> "assistant"
+                    },
+                    content = msg.content,
+                )
+            }
+
         viewModelScope.launch {
-            val response = generateSimulatedResponse(userQuery)
-            val words = response.split(" ")
-            val builder = StringBuilder()
+            try {
+                if (currentModel == null) {
+                    val idx = messages.indexOfFirst { it.id == assistantId }
+                    if (idx >= 0) {
+                        messages[idx] = messages[idx].copy(
+                            content = "⚠️ No model selected. Fetch models first.",
+                            isStreaming = false,
+                        )
+                    }
+                    isGenerating = false
+                    return@launch
+                }
+                val responseFlow = apiClient.streamChatCompletion(
+                    model = currentModel,
+                    conversationHistory = conversationHistory,
+                )
 
-            for ((i, word) in words.withIndex()) {
-                if (i > 0) builder.append(" ")
-                builder.append(word)
-                delay(Random.nextLong(30, 80))
-
+                val builder = StringBuilder()
+                responseFlow.collect { token ->
+                    builder.append(token)
+                    val idx = messages.indexOfFirst { it.id == assistantId }
+                    if (idx >= 0) {
+                        messages[idx] = messages[idx].copy(
+                            content = builder.toString(),
+                        )
+                    }
+                }
+            } catch (e: Exception) {
                 val idx = messages.indexOfFirst { it.id == assistantId }
                 if (idx >= 0) {
+                    val current = messages[idx].content
                     messages[idx] = messages[idx].copy(
-                        content = builder.toString(),
+                        content = if (current.isEmpty()) "⚠️ Error: ${e.message}" else current,
                     )
                 }
+            } finally {
+                // Mark streaming complete
+                val idx = messages.indexOfFirst { it.id == assistantId }
+                if (idx >= 0) {
+                    messages[idx] = messages[idx].copy(isStreaming = false)
+                }
+                isGenerating = false
             }
-
-            // Mark streaming complete
-            val idx = messages.indexOfFirst { it.id == assistantId }
-            if (idx >= 0) {
-                messages[idx] = messages[idx].copy(isStreaming = false)
-            }
-            isGenerating = false
         }
     }
 
@@ -125,29 +225,6 @@ class ChatViewModel : ViewModel() {
         messages.clear()
         pendingAttachments.clear()
         inputText = ""
-    }
-
-    private fun generateSimulatedResponse(query: String): String {
-        val lowerQuery = query.lowercase()
-        return when {
-            lowerQuery.contains("hello") || lowerQuery.contains("hi") ->
-                "Hello! I'm your AI assistant powered by ${selectedModel.displayName}. How can I help you today?"
-
-            lowerQuery.contains("help") ->
-                "I'd be happy to help! You can ask me questions, share files for analysis, or switch between different AI models using the model selector at the top. What would you like to know?"
-
-            lowerQuery.contains("model") ->
-                "You're currently using ${selectedModel.displayName} by ${selectedModel.provider}. You can switch models anytime using the dropdown in the top bar. Each model has different strengths -- for example, larger models tend to be more capable but slower."
-
-            lowerQuery.contains("code") || lowerQuery.contains("program") ->
-                "I can help with coding tasks! Share your code or describe what you'd like to build, and I'll assist you. You can also attach files using the attachment button for me to review."
-
-            lowerQuery.isEmpty() ->
-                "I see you've sent some attachments. Let me take a look at those files and get back to you with my analysis."
-
-            else ->
-                "That's an interesting question about \"$query\". As a simulated response from ${selectedModel.displayName}, I'm demonstrating how the chat interface works. In a production setup, this would connect to the actual ${selectedModel.provider} API to provide real responses. You can try switching models, attaching files, or asking different questions to explore the UI."
-        }
     }
 
     private fun generateId(): String {

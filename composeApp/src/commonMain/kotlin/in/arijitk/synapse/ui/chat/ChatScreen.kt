@@ -63,7 +63,7 @@ fun ChatScreen(
                 .fillMaxWidth(),
         ) {
             if (messages.isEmpty()) {
-                EmptyState(modelName = viewModel.selectedModel.displayName)
+                EmptyState(modelName = viewModel.selectedModel?.displayName)
             } else {
                 LazyColumn(
                     state = listState,
@@ -118,8 +118,11 @@ fun ChatScreen(
 
 @Composable
 internal fun ModelSelectorChip(
-    selectedModel: LlmModel,
+    selectedModel: LlmModel?,
     onModelSelected: (LlmModel) -> Unit,
+    models: List<LlmModel>,
+    isLoading: Boolean = false,
+    onRefresh: () -> Unit = {},
 ) {
     var showModelDropdown by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
@@ -136,14 +139,24 @@ internal fun ModelSelectorChip(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(
-                    Icons.Outlined.SmartToy,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = cs.onSurfaceVariant,
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.SmartToy,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
                 Text(
-                    text = selectedModel.displayName,
+                    text = selectedModel?.displayName ?: "Select model",
                     style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Icon(
                     Icons.Filled.ArrowDropDown,
@@ -157,46 +170,91 @@ internal fun ModelSelectorChip(
             expanded = showModelDropdown,
             onDismissRequest = { showModelDropdown = false },
         ) {
-            val grouped = AvailableModels.models.groupBy { it.provider }
-            grouped.forEach { (provider, models) ->
-                DropdownMenuItem(
-                    text = {
+            // Refresh button at top
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = cs.primary,
+                        )
                         Text(
-                            text = provider,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
+                            text = if (isLoading) "Fetching models..." else "Refresh models",
+                            style = MaterialTheme.typography.labelMedium,
                             color = cs.primary,
                         )
+                    }
+                },
+                onClick = {
+                    onRefresh()
+                },
+                enabled = !isLoading,
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            if (isLoading && models.isEmpty()) {
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
                     },
                     onClick = {},
                     enabled = false,
                 )
-                models.forEach { model ->
+            } else {
+                val grouped = models.groupBy { it.provider }
+                grouped.forEach { (provider, providerModels) ->
                     DropdownMenuItem(
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = model.displayName,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                if (model.id == selectedModel.id) {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = "Selected",
-                                        tint = cs.primary,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
+                            Text(
+                                text = provider,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = cs.primary,
+                            )
                         },
-                        onClick = {
-                            onModelSelected(model)
-                            showModelDropdown = false
-                        },
+                        onClick = {},
+                        enabled = false,
                     )
-                }
-                if (provider != grouped.keys.last()) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    providerModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = model.displayName,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (model.id == selectedModel?.id) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Selected",
+                                            tint = cs.primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                onModelSelected(model)
+                                showModelDropdown = false
+                            },
+                        )
+                    }
+                    if (provider != grouped.keys.last()) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    }
                 }
             }
         }
@@ -206,7 +264,7 @@ internal fun ModelSelectorChip(
 // ── Empty State ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun EmptyState(modelName: String) {
+private fun EmptyState(modelName: String?) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
@@ -236,7 +294,7 @@ private fun EmptyState(modelName: String) {
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Using $modelName",
+                text = if (modelName != null) "Using $modelName" else "Configure your API key in Settings",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

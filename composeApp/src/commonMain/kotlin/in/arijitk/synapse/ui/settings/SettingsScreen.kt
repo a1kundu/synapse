@@ -27,6 +27,7 @@ import `in`.arijitk.synapse.UpdateDialogController
 import `in`.arijitk.synapse.isAndroid
 import `in`.arijitk.synapse.isDebug
 import `in`.arijitk.synapse.openUrl
+import `in`.arijitk.synapse.settings.LlmProvider
 import `in`.arijitk.synapse.settings.SettingsRepository
 import `in`.arijitk.synapse.theme.ThemeMode
 import `in`.arijitk.synapse.theme.ThemeSettings
@@ -53,6 +54,12 @@ fun SettingsScreen(
     var dynamicColor by remember { mutableStateOf(settings.dynamicColorEnabled) }
     var autoUpdate by remember { mutableStateOf(settings.autoUpdateCheckEnabled) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
+
+    // LLM provider settings
+    var llmProvider by remember { mutableStateOf(settings.llmProvider) }
+    var llmApiKey by remember { mutableStateOf(settings.llmApiKey) }
+    var llmServerUrl by remember { mutableStateOf(settings.llmServerUrl) }
+    var showApiKey by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -152,6 +159,117 @@ fun SettingsScreen(
                             settings.dynamicColorEnabled = dynamicColor
                         },
                     )
+                }
+
+                // ── LLM Provider ────────────────────────────────────────
+                Spacer(Modifier.height(8.dp))
+                SectionHeader("LLM Provider")
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        // Provider selection
+                        LlmProvider.entries.forEach { provider ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = provider.displayName,
+                                        fontWeight = if (llmProvider == provider) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (llmProvider == provider) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                    )
+                                },
+                                supportingContent = { Text(provider.defaultBaseUrl) },
+                                leadingContent = {
+                                    IconBox(
+                                        icon = if (provider == LlmProvider.OPENAI) Icons.Outlined.SmartToy else Icons.Outlined.Hub,
+                                        color = if (llmProvider == provider) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                trailingContent = {
+                                    if (llmProvider == provider) {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.clickable {
+                                    llmProvider = provider
+                                    settings.llmProvider = provider
+                                    // Reset server URL to default when switching
+                                    if (llmServerUrl.isBlank() || llmServerUrl == LlmProvider.entries.first { it != provider }.defaultBaseUrl) {
+                                        llmServerUrl = ""
+                                        settings.llmServerUrl = ""
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // API Key
+                        Text(
+                            text = "API Key",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = llmApiKey,
+                            onValueChange = {
+                                llmApiKey = it
+                                settings.llmApiKey = it
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Enter your API key") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            visualTransformation = if (showApiKey) {
+                                androidx.compose.ui.text.input.VisualTransformation.None
+                            } else {
+                                androidx.compose.ui.text.input.PasswordVisualTransformation()
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    Icon(
+                                        imageVector = if (showApiKey) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                        contentDescription = if (showApiKey) "Hide" else "Show",
+                                    )
+                                }
+                            },
+                        )
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // Server URL
+                        Text(
+                            text = "Server URL",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Leave empty to use default: ${llmProvider.defaultBaseUrl}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = llmServerUrl,
+                            onValueChange = {
+                                llmServerUrl = it
+                                settings.llmServerUrl = it
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text(llmProvider.defaultBaseUrl) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                    }
                 }
 
                 // ── Updates (Android only) ──────────────────────────────
