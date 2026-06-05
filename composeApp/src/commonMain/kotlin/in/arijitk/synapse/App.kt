@@ -2,7 +2,10 @@ package `in`.arijitk.synapse
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -29,29 +32,30 @@ fun App() {
         NavHost(
             navController = navController,
             startDestination = Routes.HOME,
+            modifier = Modifier.background(MaterialTheme.colorScheme.background),
             enterTransition = {
                 slideInHorizontally(
                     initialOffsetX = { fullWidth -> fullWidth },
                     animationSpec = tween(300),
-                ) + fadeIn(animationSpec = tween(300))
+                )
             },
             exitTransition = {
                 slideOutHorizontally(
                     targetOffsetX = { fullWidth -> -fullWidth / 3 },
                     animationSpec = tween(300),
-                ) + fadeOut(animationSpec = tween(150))
+                )
             },
             popEnterTransition = {
                 slideInHorizontally(
                     initialOffsetX = { fullWidth -> -fullWidth / 3 },
                     animationSpec = tween(300),
-                ) + fadeIn(animationSpec = tween(300))
+                )
             },
             popExitTransition = {
                 slideOutHorizontally(
                     targetOffsetX = { fullWidth -> fullWidth },
                     animationSpec = tween(300),
-                ) + fadeOut(animationSpec = tween(150))
+                )
             },
         ) {
             composable(Routes.HOME) {
