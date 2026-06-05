@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+      BUILD_TYPE: ${{ github.event.inputs.build_type || 'debug' }}
 
     steps:
       - name: Checkout
