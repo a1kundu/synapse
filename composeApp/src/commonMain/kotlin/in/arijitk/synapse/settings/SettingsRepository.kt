@@ -26,6 +26,7 @@ class SettingsRepository(
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DYNAMIC_COLOR = "dynamic_color"
         private const val KEY_AUTO_UPDATE = "auto_update_check"
+        private const val KEY_PENDING_UPDATE = "pending_update_json"
 
         private var _instance: SettingsRepository? = null
         val instance: SettingsRepository
@@ -53,6 +54,13 @@ class SettingsRepository(
         get() = prefs.getBoolean(KEY_AUTO_UPDATE, true)
         set(value) {
             prefs.putBoolean(KEY_AUTO_UPDATE, value)
+        }
+
+    // Persisted pending update JSON (for notification tap recovery after app kill)
+    var pendingUpdateJson: String
+        get() = prefs.getString(KEY_PENDING_UPDATE, "")
+        set(value) {
+            prefs.putString(KEY_PENDING_UPDATE, value)
         }
 
     /**

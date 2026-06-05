@@ -5,7 +5,9 @@ import kotlinx.serialization.Serializable
 
 /**
  * Represents an available app update from GitHub Releases.
+ * Serializable for persistence (notification tap recovery after app kill).
  */
+@Serializable
 data class AppUpdate(
     val buildNumber: Int,
     val version: String,

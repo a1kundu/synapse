@@ -1,9 +1,12 @@
 package `in`.arijitk.synapse.update
 
+import `in`.arijitk.synapse.settings.SettingsRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -41,6 +44,7 @@ object DownloadManager {
         if (downloadJob?.isActive == true && activeUpdate?.tagName == update.tagName) return
 
         activeUpdate = update
+        persistActiveUpdate(update)
         _state.value = DownloadState.Downloading(0f, 0, update.fileSize)
         speedBps = 0.0
         lastProgress = 0f
@@ -104,8 +108,37 @@ object DownloadManager {
     /** Reset state to [DownloadState.Idle]. */
     fun reset() {
         activeUpdate = null
+        clearPersistedUpdate()
         _state.value = DownloadState.Idle
         speedBps = 0.0
+    }
+
+    /**
+     * Restore [activeUpdate] from persisted JSON (for notification tap after app kill).
+     * Returns the restored [AppUpdate] or null if none was persisted.
+     */
+    fun restoreActiveUpdate(): AppUpdate? {
+        if (activeUpdate != null) return activeUpdate
+        val json = SettingsRepository.instance.pendingUpdateJson
+        if (json.isBlank()) return null
+        return try {
+            Json.decodeFromString<AppUpdate>(json).also { activeUpdate = it }
+        } catch (_: Exception) {
+            clearPersistedUpdate()
+            null
+        }
+    }
+
+    private fun persistActiveUpdate(update: AppUpdate) {
+        try {
+            SettingsRepository.instance.pendingUpdateJson = Json.encodeToString(update)
+        } catch (_: Exception) {}
+    }
+
+    private fun clearPersistedUpdate() {
+        try {
+            SettingsRepository.instance.pendingUpdateJson = ""
+        } catch (_: Exception) {}
     }
 
     /** Install the completed APK (from Completed state or existing file). */
