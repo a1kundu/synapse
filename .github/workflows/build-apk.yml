@@ -97,12 +97,12 @@ jobs:
           BUILD_NUM="${{ steps.meta.outputs.build_number }}"
           if [ "${{ env.BUILD_TYPE }}" = "release" ]; then
             ./gradlew :composeApp:assembleRelease \
-              -Pandroid.injected.version.code="$BUILD_NUM" \
-              -Pandroid.injected.version.name="$VERSION"
+              -Papp.versionCode="$BUILD_NUM" \
+              -Papp.versionName="$VERSION"
           else
             ./gradlew :composeApp:assembleDebug \
-              -Pandroid.injected.version.code="$BUILD_NUM" \
-              -Pandroid.injected.version.name="$VERSION"
+              -Papp.versionCode="$BUILD_NUM" \
+              -Papp.versionName="$VERSION"
           fi
 
       - name: Rename APK
