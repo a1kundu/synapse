@@ -6,12 +6,17 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import `in`.arijitk.synapse.settings.ApplicationContextHolder
+import `in`.arijitk.synapse.theme.ThemeMode
+import `in`.arijitk.synapse.theme.ThemeSettings
 import `in`.arijitk.synapse.update.DownloadManager
 import kotlinx.coroutines.launch
 
@@ -41,6 +46,28 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         setContent {
+            val isDark = when (ThemeSettings.themeMode) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+            }
+
+            DisposableEffect(isDark) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                        detectDarkMode = { isDark },
+                    ),
+                    navigationBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                        detectDarkMode = { isDark },
+                    ),
+                )
+                onDispose {}
+            }
+
             App()
         }
     }
