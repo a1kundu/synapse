@@ -18,6 +18,8 @@ build/
 *.aab
 *.dex
 local.properties
+key.properties
+**/key.properties
 *.jks
 *.keystore
 captures/

@@ -58,12 +58,11 @@ jobs:
       - name: Create key.properties
         if: env.BUILD_TYPE == 'release'
         run: |
-          cat > composeApp/key.properties <<EOF
-          storeFile=release-keystore.jks
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
+          printf 'storeFile=release-keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "${{ secrets.KEYSTORE_PASSWORD }}" \
+            "${{ secrets.KEY_ALIAS }}" \
+            "${{ secrets.KEY_PASSWORD }}" \
+            > composeApp/key.properties
 
       - name: Generate changelog
         id: changelog
