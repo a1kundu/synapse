@@ -54,7 +54,7 @@ jobs:
           echo "Stamped version: $VERSION"
 
       - name: Decode keystore
-        if: env.BUILD_TYPE == 'release' && env.HAS_KEYSTORE == 'true'
+        if: env.HAS_KEYSTORE == 'true'
         env:
           HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
         run: |
@@ -62,7 +62,7 @@ jobs:
           echo "Keystore size: $(wc -c < composeApp/release-keystore.jks) bytes"
 
       - name: Create key.properties
-        if: env.BUILD_TYPE == 'release' && env.HAS_KEYSTORE == 'true'
+        if: env.HAS_KEYSTORE == 'true'
         env:
           HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
         run: |
