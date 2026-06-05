@@ -51,12 +51,13 @@ jobs:
           echo "Stamped version: $VERSION"
 
       - name: Decode keystore
-        if: env.BUILD_TYPE == 'release'
+        if: env.BUILD_TYPE == 'release' && secrets.KEYSTORE_BASE64 != ''
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > composeApp/release-keystore.jks
+          echo "Keystore size: $(wc -c < composeApp/release-keystore.jks) bytes"
 
       - name: Create key.properties
-        if: env.BUILD_TYPE == 'release'
+        if: env.BUILD_TYPE == 'release' && secrets.KEYSTORE_BASE64 != ''
         run: |
           printf 'storeFile=release-keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
             "${{ secrets.KEYSTORE_PASSWORD }}" \
@@ -103,12 +104,16 @@ jobs:
           BUILD_TYPE="${{ env.BUILD_TYPE }}"
           VERSION="${{ steps.meta.outputs.build_number }}.0.0-${{ steps.meta.outputs.sha_short }}"
 
-          if [ "$BUILD_TYPE" = "release" ]; then
-            APK_PATH="composeApp/build/outputs/apk/release/composeApp-release.apk"
-          else
-            APK_PATH="composeApp/build/outputs/apk/debug/composeApp-debug.apk"
+          # Find the APK dynamically (handles signed/unsigned variants)
+          APK_PATH=$(find composeApp/build/outputs/apk -name "*.apk" -type f | head -1)
+
+          if [ -z "$APK_PATH" ]; then
+            echo "ERROR: No APK found in composeApp/build/outputs/apk/"
+            find composeApp/build/outputs/ -type f || true
+            exit 1
           fi
 
+          echo "Found APK: $APK_PATH"
           FINAL_NAME="synapse-${BUILD_TYPE}-${VERSION}.apk"
           mv "$APK_PATH" "$FINAL_NAME"
           echo "apk_name=$FINAL_NAME" >> $GITHUB_OUTPUT
