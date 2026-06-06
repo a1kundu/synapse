@@ -89,6 +89,7 @@ class ChatViewModel : ViewModel() {
 
     fun selectModel(model: LlmModel) {
         selectedModel = model
+        SettingsRepository.instance.lastSelectedModelId = model.id
     }
 
     /**
@@ -107,9 +108,11 @@ class ChatViewModel : ViewModel() {
                 if (models.isNotEmpty()) {
                     availableModels.clear()
                     availableModels.addAll(models)
-                    // If no model selected or current not in list, select first
+                    // Restore last selected model, or pick first
+                    val lastId = settings.lastSelectedModelId
+                    val restored = if (lastId.isNotBlank()) models.find { it.id == lastId } else null
                     if (selectedModel == null || models.none { it.id == selectedModel?.id }) {
-                        selectedModel = models.first()
+                        selectedModel = restored ?: models.first()
                     }
                 }
                 modelFetchError = null

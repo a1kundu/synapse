@@ -42,6 +42,7 @@ class SettingsRepository(
         private const val KEY_LLM_API_KEY = "llm_api_key"
         private const val KEY_LLM_SERVER_URL = "llm_server_url"
         private const val KEY_MCP_SERVERS = "mcp_servers_json"
+        private const val KEY_LAST_MODEL_ID = "last_selected_model_id"
 
         private var _instance: SettingsRepository? = null
         val instance: SettingsRepository
@@ -134,6 +135,13 @@ class SettingsRepository(
     fun removeMcpServer(name: String) {
         mcpServers = mcpServers.filter { it.name != name }
     }
+
+    // Last selected model ID
+    var lastSelectedModelId: String
+        get() = prefs.getString(KEY_LAST_MODEL_ID, "")
+        set(value) {
+            prefs.putString(KEY_LAST_MODEL_ID, value)
+        }
 
     /** Resolved base URL: custom if set, otherwise provider default. */
     val resolvedBaseUrl: String

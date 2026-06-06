@@ -139,7 +139,19 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
+                    IconButton(
+                        onClick = { viewModel.refreshMcpTools() },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Refresh,
+                            contentDescription = "Retry",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 } else if (mcpToolCount > 0) {
                     Icon(
                         Icons.Outlined.Extension,
@@ -151,7 +163,19 @@ fun ChatScreen(
                         "$mcpToolCount MCP tool${if (mcpToolCount > 1) "s" else ""} available",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
                     )
+                    IconButton(
+                        onClick = { viewModel.refreshMcpTools() },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Refresh,
+                            contentDescription = "Refresh MCP tools",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
