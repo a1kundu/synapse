@@ -8,6 +8,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import io.ktor.utils.io.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
@@ -187,8 +188,8 @@ class LlmApiClient {
     }
 
     /**
-     * Send a chat completion request and stream back tokens.
-     * Uses Server-Sent Events (SSE) streaming.
+     * Send a chat completion request and stream back tokens via SSE.
+     * Reads the response body incrementally line-by-line using bodyAsChannel().
      */
     fun streamChatCompletion(
         model: LlmModel,
@@ -213,7 +214,6 @@ class LlmApiClient {
             val response: HttpResponse = client.post("$baseUrl/chat/completions") {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
-                // OpenRouter-specific headers
                 if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
                     header("HTTP-Referer", "https://synapse.arijitk.in")
                     header("X-Title", "Synapse")
@@ -233,12 +233,12 @@ class LlmApiClient {
                 return@flow
             }
 
-            // Parse SSE stream
-            val fullText = response.bodyAsText()
-            val lines = fullText.split("\n")
-
-            for (line in lines) {
+            // Read SSE stream line-by-line via ByteReadChannel
+            val channel: ByteReadChannel = response.bodyAsChannel()
+            while (!channel.isClosedForRead) {
+                val line = channel.readUTF8Line() ?: break
                 val trimmed = line.trim()
+                if (trimmed.isEmpty()) continue
                 if (!trimmed.startsWith("data: ")) continue
                 val data = trimmed.removePrefix("data: ").trim()
                 if (data == "[DONE]") break

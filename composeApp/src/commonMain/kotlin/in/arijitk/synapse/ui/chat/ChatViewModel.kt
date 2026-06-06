@@ -187,6 +187,8 @@ class ChatViewModel : ViewModel() {
                     isGenerating = false
                     return@launch
                 }
+
+                // Stream tokens from the LLM API
                 val responseFlow = apiClient.streamChatCompletion(
                     model = currentModel,
                     conversationHistory = conversationHistory,
