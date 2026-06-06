@@ -204,6 +204,17 @@ class ChatViewModel : ViewModel() {
                         )
                     }
                 }
+
+                // Safety net: if streaming completed but produced no content,
+                // show a user-visible message instead of leaving the bubble empty.
+                if (builder.isEmpty()) {
+                    val idx = messages.indexOfFirst { it.id == assistantId }
+                    if (idx >= 0) {
+                        messages[idx] = messages[idx].copy(
+                            content = "No response received from the model. Please try again.",
+                        )
+                    }
+                }
             } catch (e: Exception) {
                 val idx = messages.indexOfFirst { it.id == assistantId }
                 if (idx >= 0) {

@@ -368,7 +368,7 @@ private fun MessageBubble(message: ChatMessage) {
                 bottomEnd = if (isUser) 4.dp else 16.dp,
             ),
             color = bubbleColor,
-            modifier = Modifier.widthIn(max = 340.dp),
+            modifier = Modifier.widthIn(min = 60.dp, max = 340.dp),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 // Attachments
@@ -387,6 +387,14 @@ private fun MessageBubble(message: ChatMessage) {
                         text = message.content,
                         style = MaterialTheme.typography.bodyMedium,
                         color = contentColor,
+                    )
+                } else if (!message.isStreaming) {
+                    // Fallback for empty non-streaming messages — prevents
+                    // the bubble from collapsing to an invisible dot.
+                    Text(
+                        text = "Empty response",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = contentColor.copy(alpha = 0.5f),
                     )
                 }
 

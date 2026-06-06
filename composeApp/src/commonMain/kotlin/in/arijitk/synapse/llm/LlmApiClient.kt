@@ -8,7 +8,6 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
-import io.ktor.utils.io.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
@@ -233,14 +232,18 @@ class LlmApiClient {
                 return@flow
             }
 
-            // Read SSE stream line-by-line via ByteReadChannel
-            val channel: ByteReadChannel = response.bodyAsChannel()
-            while (!channel.isClosedForRead) {
-                val line = channel.readUTF8Line() ?: break
+            // Read the full response text and parse SSE events.
+            // Using bodyAsText() instead of bodyAsChannel().readUTF8Line()
+            // for reliable cross-platform support (Wasm/JS Fetch API may not
+            // stream ByteReadChannel correctly).
+            val fullText = response.bodyAsText()
+            var hasEmittedContent = false
+
+            for (line in fullText.lines()) {
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
-                if (!trimmed.startsWith("data: ")) continue
-                val data = trimmed.removePrefix("data: ").trim()
+                if (!trimmed.startsWith("data:")) continue
+                val data = trimmed.removePrefix("data:").trim()
                 if (data == "[DONE]") break
 
                 try {
@@ -248,10 +251,31 @@ class LlmApiClient {
                     val content = chunk.choices.firstOrNull()?.delta?.content
                     if (!content.isNullOrEmpty()) {
                         emit(content)
+                        hasEmittedContent = true
                     }
                 } catch (_: Exception) {
-                    // Skip malformed chunks
+                    // Skip malformed SSE chunks
                 }
+            }
+
+            // Fallback: if SSE parsing yielded nothing, try as a regular
+            // (non-streaming) JSON response — some providers may ignore the
+            // stream flag and return a single JSON object.
+            if (!hasEmittedContent) {
+                try {
+                    val result = json.decodeFromString<ChatCompletionResponse>(fullText)
+                    val content = result.choices.firstOrNull()?.message?.content
+                    if (!content.isNullOrEmpty()) {
+                        emit(content)
+                        hasEmittedContent = true
+                    }
+                } catch (_: Exception) {
+                    // Not a valid non-streaming response either
+                }
+            }
+
+            if (!hasEmittedContent) {
+                emit("No response content received from the model.")
             }
         } catch (e: Exception) {
             emit("⚠️ Connection error: ${e.message ?: "Unknown error"}")
