@@ -186,7 +186,11 @@ fun SettingsScreen(
                                 supportingContent = { Text(provider.defaultBaseUrl) },
                                 leadingContent = {
                                     IconBox(
-                                        icon = if (provider == LlmProvider.OPENAI) Icons.Outlined.SmartToy else Icons.Outlined.Hub,
+                                        icon = when (provider) {
+                                            LlmProvider.OPENAI -> Icons.Outlined.SmartToy
+                                            LlmProvider.GITHUB_MODELS -> Icons.Outlined.Code
+                                            else -> Icons.Outlined.Hub
+                                        },
                                         color = if (llmProvider == provider) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 },

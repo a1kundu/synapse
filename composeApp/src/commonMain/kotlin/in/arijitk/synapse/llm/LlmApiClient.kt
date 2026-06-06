@@ -243,6 +243,7 @@ class LlmApiClient {
             ownedBy.contains("google", ignoreCase = true) -> "Google"
             ownedBy.contains("meta", ignoreCase = true) -> "Meta"
             ownedBy.contains("mistral", ignoreCase = true) -> "Mistral"
+            ownedBy.contains("github", ignoreCase = true) -> "GitHub"
             else -> ownedBy.replaceFirstChar { it.uppercaseChar() }
         }
     }
