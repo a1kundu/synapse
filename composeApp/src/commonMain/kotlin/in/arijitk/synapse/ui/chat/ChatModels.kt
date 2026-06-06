@@ -7,6 +7,7 @@ data class LlmModel(
     val id: String,
     val displayName: String,
     val provider: String,
+    val supportsTools: Boolean = true,
 )
 
 /**

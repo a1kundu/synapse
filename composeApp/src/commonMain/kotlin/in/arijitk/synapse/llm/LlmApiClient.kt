@@ -232,6 +232,7 @@ class LlmApiClient {
                             id = model.id,
                             displayName = model.name.ifBlank { formatModelName(model.id) },
                             provider = model.publisher.ifBlank { "GitHub" },
+                            supportsTools = model.capabilities.contains("tool-calling"),
                         )
                     }
             } else {
