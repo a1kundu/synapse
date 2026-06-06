@@ -434,6 +434,7 @@ When you need to use a tool, the system will automatically invoke it for you via
         )
 
         val builder = StringBuilder()
+        var toolCallHandled = false
         eventFlow.collect { event ->
             when (event) {
                 is StreamEvent.Token -> {
@@ -442,18 +443,17 @@ When you need to use a tool, the system will automatically invoke it for you via
                     yield()
                 }
                 is StreamEvent.Done -> {
+                    if (toolCallHandled) return@collect
                     val toolCalls = event.toolCalls
                     if (toolCalls.isNotEmpty() && toolCalls.any { it.function.name.isNotBlank() }) {
-                        // LLM wants to call tools
+                        toolCallHandled = true
                         handleToolCalls(assistantId, model, conversationHistory, toolCalls, mcpTools)
                     } else if (builder.isEmpty()) {
                         updateMessage(assistantId, "No response received from the model. Please try again.")
                     }
                 }
                 is StreamEvent.Error -> {
-                    if (builder.isEmpty()) {
-                        updateMessage(assistantId, "⚠️ Error: ${event.message}")
-                    }
+                    updateMessage(assistantId, "⚠️ Error: ${event.message}", streaming = false)
                 }
             }
         }

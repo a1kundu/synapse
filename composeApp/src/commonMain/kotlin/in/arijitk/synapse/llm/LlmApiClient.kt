@@ -344,6 +344,7 @@ class LlmApiClient {
 
         // Accumulators for tool calls built from deltas
         val toolCallMap = mutableMapOf<Int, MutableToolCall>()
+        var doneEmitted = false
 
         try {
             client.preparePost("$baseUrl/chat/completions") {
@@ -364,11 +365,13 @@ class LlmApiClient {
                         "HTTP ${response.status.value}: $errorBody"
                     }
                     emit(StreamEvent.Error(errorMessage))
+                    doneEmitted = true
                     return@execute
                 }
 
                 // Parse SSE body
                 val fullText = response.bodyAsText()
+                var hasSSEData = false
                 for (line in fullText.lines()) {
                     val trimmed = line.trim()
                     if (trimmed.isEmpty() || !trimmed.startsWith("data:")) continue
@@ -377,29 +380,46 @@ class LlmApiClient {
 
                     try {
                         val chunk = json.decodeFromString<ChatCompletionResponse>(data)
-                        val delta = chunk.choices.firstOrNull()?.delta ?: continue
+                        val choice = chunk.choices.firstOrNull() ?: continue
+                        hasSSEData = true
 
-                        // Emit text content
-                        val content = delta.content
-                        if (!content.isNullOrEmpty()) {
-                            emit(StreamEvent.Token(content))
+                        val delta = choice.delta
+                        if (delta != null) {
+                            // Emit text content (skip if it's just tool-call reasoning)
+                            val content = delta.content
+                            if (!content.isNullOrEmpty()) {
+                                emit(StreamEvent.Token(content))
+                            }
+
+                            // Accumulate tool call deltas
+                            delta.toolCalls?.forEach { tcd ->
+                                val tc = toolCallMap.getOrPut(tcd.index) { MutableToolCall() }
+                                tcd.id?.let { tc.id = it }
+                                tcd.type?.let { tc.type = it }
+                                tcd.function?.name?.let { tc.name += it }
+                                tcd.function?.arguments?.let { tc.arguments += it }
+                            }
                         }
 
-                        // Accumulate tool call deltas
-                        delta.toolCalls?.forEach { tcd ->
-                            val tc = toolCallMap.getOrPut(tcd.index) { MutableToolCall() }
-                            tcd.id?.let { tc.id = it }
-                            tcd.type?.let { tc.type = it }
-                            tcd.function?.name?.let { tc.name += it }
-                            tcd.function?.arguments?.let { tc.arguments += it }
+                        // Non-streaming response (message instead of delta)
+                        val message = choice.message
+                        if (message != null) {
+                            val c = message.content
+                            if (!c.isNullOrEmpty()) emit(StreamEvent.Token(c))
+                            val tcs = message.toolCalls
+                            if (!tcs.isNullOrEmpty()) {
+                                emit(StreamEvent.Done(tcs))
+                                doneEmitted = true
+                                return@execute
+                            }
                         }
                     } catch (_: Exception) {
                         // skip malformed chunks
                     }
                 }
 
-                // Fallback: try non-streaming parse if no events emitted
-                if (toolCallMap.isEmpty()) {
+                // Fallback: try parsing whole body as non-streaming JSON
+                if (!hasSSEData && !doneEmitted) {
                     try {
                         val result = json.decodeFromString<ChatCompletionResponse>(fullText)
                         val msg = result.choices.firstOrNull()?.message
@@ -409,6 +429,7 @@ class LlmApiClient {
                             val tcs = msg.toolCalls
                             if (!tcs.isNullOrEmpty()) {
                                 emit(StreamEvent.Done(tcs))
+                                doneEmitted = true
                                 return@execute
                             }
                         }
@@ -416,20 +437,22 @@ class LlmApiClient {
                 }
             }
 
-            // Emit completed tool calls
-            val finalToolCalls = toolCallMap.entries
-                .sortedBy { it.key }
-                .map { (_, tc) ->
-                    ToolCallInfo(
-                        id = tc.id,
-                        type = tc.type,
-                        function = ToolCallFunctionInfo(
-                            name = tc.name,
-                            arguments = tc.arguments,
+            // Emit Done only if not already emitted
+            if (!doneEmitted) {
+                val finalToolCalls = toolCallMap.entries
+                    .sortedBy { it.key }
+                    .map { (_, tc) ->
+                        ToolCallInfo(
+                            id = tc.id,
+                            type = tc.type,
+                            function = ToolCallFunctionInfo(
+                                name = tc.name,
+                                arguments = tc.arguments,
+                            )
                         )
-                    )
-                }
-            emit(StreamEvent.Done(finalToolCalls))
+                    }
+                emit(StreamEvent.Done(finalToolCalls))
+            }
         } catch (e: Exception) {
             emit(StreamEvent.Error("Connection error: ${e.message ?: "Unknown error"}"))
         }
