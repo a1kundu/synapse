@@ -17,6 +17,9 @@ import `in`.arijitk.synapse.mcp.McpServerTool
 import `in`.arijitk.synapse.settings.SettingsRepository
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlin.random.Random
@@ -324,7 +327,17 @@ class ChatViewModel : ViewModel() {
     ): List<ChatRequestMessage> {
         val history = mutableListOf<ChatRequestMessage>()
 
-        // System prompt with MCP tool descriptions
+        // Current date/time for the system prompt
+        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        val dateTime = "${now.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}, " +
+            "${now.month.name.lowercase().replaceFirstChar { it.uppercase() }} ${now.dayOfMonth}, ${now.year} " +
+            "${now.hour.toString().padStart(2, '0')}:${now.minute.toString().padStart(2, '0')}"
+
+        // Build system prompt
+        val systemPromptParts = mutableListOf<String>()
+        systemPromptParts.add("You are Synapse, a helpful AI assistant.\nCurrent date and time: $dateTime")
+
+        // Append MCP tool descriptions if available
         if (tools.isNotEmpty()) {
             val toolDescriptions = tools.joinToString("\n\n") { serverTool ->
                 val schema = serverTool.tool.inputSchema?.toString() ?: "{}"
@@ -333,18 +346,22 @@ class ChatViewModel : ViewModel() {
                     "  Input schema: $schema"
             }
 
-            history.add(
-                ChatRequestMessage(
-                    role = "system",
-                    content = """You have access to the following tools via MCP (Model Context Protocol) servers. Use them when appropriate to help the user.
+            systemPromptParts.add(
+                """You have access to the following tools via MCP (Model Context Protocol) servers. Use them when appropriate to help the user.
 
 Available tools:
 $toolDescriptions
 
-When you need to use a tool, the system will automatically invoke it for you via function calling.""",
-                )
+When you need to use a tool, the system will automatically invoke it for you via function calling."""
             )
         }
+
+        history.add(
+            ChatRequestMessage(
+                role = "system",
+                content = systemPromptParts.joinToString("\n\n"),
+            )
+        )
 
         // Add conversation messages
         history.addAll(
