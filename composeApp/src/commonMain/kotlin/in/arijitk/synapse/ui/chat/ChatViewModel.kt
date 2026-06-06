@@ -72,6 +72,10 @@ class ChatViewModel : ViewModel() {
     var isLoadingMcpTools by mutableStateOf(false)
         private set
 
+    /** Error from last MCP tool discovery. */
+    var mcpError by mutableStateOf<String?>(null)
+        private set
+
     init {
         // Auto-fetch models if API key is configured
         refreshModels()
@@ -127,12 +131,15 @@ class ChatViewModel : ViewModel() {
         val servers = SettingsRepository.instance.mcpServers
         if (servers.isEmpty()) {
             mcpTools.clear()
+            mcpError = null
             return
         }
 
         isLoadingMcpTools = true
+        mcpError = null
         viewModelScope.launch {
             val allTools = mutableListOf<McpServerTool>()
+            val errors = mutableListOf<String>()
             for (server in servers) {
                 mcpClient.discoverTools(server)
                     .onSuccess { tools ->
@@ -140,10 +147,13 @@ class ChatViewModel : ViewModel() {
                             allTools.add(McpServerTool(server.name, server, tool))
                         }
                     }
-                    .onFailure { /* silently skip failed servers */ }
+                    .onFailure { e ->
+                        errors.add("${server.name}: ${e.message}")
+                    }
             }
             mcpTools.clear()
             mcpTools.addAll(allTools)
+            mcpError = if (errors.isNotEmpty()) errors.joinToString("; ") else null
             isLoadingMcpTools = false
         }
     }
@@ -199,11 +209,14 @@ class ChatViewModel : ViewModel() {
         val servers = SettingsRepository.instance.mcpServers
         if (servers.isEmpty()) {
             mcpTools.clear()
+            mcpError = null
             return
         }
 
         isLoadingMcpTools = true
+        mcpError = null
         val allTools = mutableListOf<McpServerTool>()
+        val errors = mutableListOf<String>()
         for (server in servers) {
             mcpClient.discoverTools(server)
                 .onSuccess { tools ->
@@ -211,9 +224,13 @@ class ChatViewModel : ViewModel() {
                         allTools.add(McpServerTool(server.name, server, tool))
                     }
                 }
+                .onFailure { e ->
+                    errors.add("${server.name}: ${e.message}")
+                }
         }
         mcpTools.clear()
         mcpTools.addAll(allTools)
+        mcpError = if (errors.isNotEmpty()) errors.joinToString("; ") else null
         isLoadingMcpTools = false
     }
 

@@ -106,6 +106,56 @@ fun ChatScreen(
             )
         }
 
+        // MCP tools status
+        val mcpToolCount = viewModel.mcpTools.size
+        val mcpError = viewModel.mcpError
+        val isLoadingMcpTools = viewModel.isLoadingMcpTools
+
+        if (isLoadingMcpTools || mcpToolCount > 0 || mcpError != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (isLoadingMcpTools) {
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                    Text(
+                        "Discovering MCP tools…",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (mcpError != null && mcpToolCount == 0) {
+                    Icon(
+                        Icons.Outlined.ErrorOutline,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        "MCP error: $mcpError",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else if (mcpToolCount > 0) {
+                    Icon(
+                        Icons.Outlined.Extension,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "$mcpToolCount MCP tool${if (mcpToolCount > 1) "s" else ""} available",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+
         // Input bar
         ChatInputBar(
             text = viewModel.inputText,
