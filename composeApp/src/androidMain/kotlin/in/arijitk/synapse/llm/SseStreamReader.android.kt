@@ -6,18 +6,22 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.serialization.json.Json
 
 /**
  * Android implementation – reads SSE via [ByteReadChannel] for true
- * token-by-token streaming so the chat UI updates incrementally.
+ * line-by-line incremental streaming. Emits raw `data:` field values
+ * (JSON strings) as they arrive so the caller can parse and update the
+ * UI token-by-token.
+ *
+ * If no SSE `data:` lines are found (non-streaming response), the
+ * accumulated body text is emitted as a single value for fallback parsing.
  */
-actual fun readSseStream(response: HttpResponse, json: Json): Flow<String> = flow {
+actual fun readSseStream(response: HttpResponse): Flow<String> = flow {
     val channel: ByteReadChannel = response.bodyAsChannel()
-    var hasEmittedContent = false
+    var hasEmittedData = false
 
-    // Accumulate raw lines so we can attempt a non-streaming JSON
-    // fallback if no SSE content tokens are found.
+    // Accumulate raw lines so we can attempt a non-streaming fallback
+    // if the provider ignores the stream flag.
     val rawLines = StringBuilder()
 
     while (!channel.isClosedForRead) {
@@ -25,42 +29,21 @@ actual fun readSseStream(response: HttpResponse, json: Json): Flow<String> = flo
         rawLines.appendLine(line)
 
         val trimmed = line.trim()
-        if (trimmed.isEmpty()) continue
-        if (!trimmed.startsWith("data:")) continue
+        if (trimmed.isEmpty() || !trimmed.startsWith("data:")) continue
 
         val data = trimmed.removePrefix("data:").trim()
         if (data == "[DONE]") break
 
-        try {
-            val chunk = json.decodeFromString<ChatCompletionResponse>(data)
-            val content = chunk.choices.firstOrNull()?.delta?.content
-            if (!content.isNullOrEmpty()) {
-                emit(content)
-                hasEmittedContent = true
-            }
-        } catch (_: Exception) {
-            // Skip malformed SSE chunks
-        }
+        emit(data)
+        hasEmittedData = true
     }
 
-    // Fallback: if SSE parsing yielded nothing, the provider may have
-    // returned a regular (non-streaming) JSON response.
-    if (!hasEmittedContent) {
-        try {
-            val result = json.decodeFromString<ChatCompletionResponse>(
-                rawLines.toString().trim(),
-            )
-            val content = result.choices.firstOrNull()?.message?.content
-            if (!content.isNullOrEmpty()) {
-                emit(content)
-                hasEmittedContent = true
-            }
-        } catch (_: Exception) {
-            // Not a valid non-streaming response either
+    // Fallback: if no SSE data lines were found, emit the full body
+    // so the caller can try parsing it as a non-streaming JSON response.
+    if (!hasEmittedData) {
+        val fullText = rawLines.toString().trim()
+        if (fullText.isNotEmpty()) {
+            emit(fullText)
         }
-    }
-
-    if (!hasEmittedContent) {
-        emit("No response content received from the model.")
     }
 }

@@ -4,57 +4,37 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.serialization.json.Json
 
 /**
  * Wasm/JS implementation – reads the full response via [bodyAsText] and
- * parses SSE events from the complete text.
+ * emits raw SSE `data:` field values (JSON strings) from the complete text.
  *
  * The browser Fetch API does not reliably expose a line-oriented
- * streaming channel through Ktor's [ByteReadChannel], so we trade
- * incremental rendering for guaranteed content delivery.
+ * streaming channel through Ktor's [io.ktor.utils.io.ByteReadChannel],
+ * so incremental rendering is not possible on this platform; all tokens
+ * are emitted in a batch after the full response has been received.
+ *
+ * If no SSE `data:` lines are found (non-streaming response), the full
+ * body text is emitted as a single value for fallback parsing.
  */
-actual fun readSseStream(response: HttpResponse, json: Json): Flow<String> = flow {
+actual fun readSseStream(response: HttpResponse): Flow<String> = flow {
     val fullText = response.bodyAsText()
-    var hasEmittedContent = false
+    var hasEmittedData = false
 
     for (line in fullText.lines()) {
         val trimmed = line.trim()
-        if (trimmed.isEmpty()) continue
-        if (!trimmed.startsWith("data:")) continue
+        if (trimmed.isEmpty() || !trimmed.startsWith("data:")) continue
 
         val data = trimmed.removePrefix("data:").trim()
         if (data == "[DONE]") break
 
-        try {
-            val chunk = json.decodeFromString<ChatCompletionResponse>(data)
-            val content = chunk.choices.firstOrNull()?.delta?.content
-            if (!content.isNullOrEmpty()) {
-                emit(content)
-                hasEmittedContent = true
-            }
-        } catch (_: Exception) {
-            // Skip malformed SSE chunks
-        }
+        emit(data)
+        hasEmittedData = true
     }
 
-    // Fallback: if SSE parsing yielded nothing, try as a regular
-    // (non-streaming) JSON response — some providers may ignore the
-    // stream flag and return a single JSON object.
-    if (!hasEmittedContent) {
-        try {
-            val result = json.decodeFromString<ChatCompletionResponse>(fullText)
-            val content = result.choices.firstOrNull()?.message?.content
-            if (!content.isNullOrEmpty()) {
-                emit(content)
-                hasEmittedContent = true
-            }
-        } catch (_: Exception) {
-            // Not a valid non-streaming response either
-        }
-    }
-
-    if (!hasEmittedContent) {
-        emit("No response content received from the model.")
+    // Fallback: if no SSE data lines were found, emit the full body
+    // so the caller can try parsing it as a non-streaming JSON response.
+    if (!hasEmittedData) {
+        emit(fullText)
     }
 }

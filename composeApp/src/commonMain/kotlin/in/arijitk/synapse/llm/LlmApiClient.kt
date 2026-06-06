@@ -377,8 +377,22 @@ class LlmApiClient {
                 // Delegate SSE parsing to platform-specific implementation.
                 // Must collect inside execute{} — the connection closes when
                 // execute returns.
-                readSseStream(response, json).collect { token ->
-                    emit(token)
+                var hasEmittedContent = false
+                readSseStream(response).collect { data ->
+                    try {
+                        val chunk = json.decodeFromString<ChatCompletionResponse>(data)
+                        val content = chunk.choices.firstOrNull()?.delta?.content
+                            ?: chunk.choices.firstOrNull()?.message?.content
+                        if (!content.isNullOrEmpty()) {
+                            emit(content)
+                            hasEmittedContent = true
+                        }
+                    } catch (_: Exception) {
+                        // Skip malformed chunks
+                    }
+                }
+                if (!hasEmittedContent) {
+                    emit("No response content received from the model.")
                 }
             }
         } catch (e: Exception) {
@@ -435,23 +449,20 @@ class LlmApiClient {
                     return@execute
                 }
 
-                // Parse SSE body
-                val fullText = response.bodyAsText()
-                var hasSSEData = false
-                for (line in fullText.lines()) {
-                    val trimmed = line.trim()
-                    if (trimmed.isEmpty() || !trimmed.startsWith("data:")) continue
-                    val data = trimmed.removePrefix("data:").trim()
-                    if (data == "[DONE]") break
-
+                // Delegate SSE reading to platform-specific implementation.
+                // On Android this streams token-by-token via ByteReadChannel;
+                // on Wasm/JS it falls back to bodyAsText() (browser limitation).
+                // Must collect inside execute{} — the connection closes when
+                // execute returns.
+                readSseStream(response).collect { data ->
+                    if (doneEmitted) return@collect
                     try {
                         val chunk = json.decodeFromString<ChatCompletionResponse>(data)
-                        val choice = chunk.choices.firstOrNull() ?: continue
-                        hasSSEData = true
+                        val choice = chunk.choices.firstOrNull() ?: return@collect
 
                         val delta = choice.delta
                         if (delta != null) {
-                            // Emit text content (skip if it's just tool-call reasoning)
+                            // Emit text content token
                             val content = delta.content
                             if (!content.isNullOrEmpty()) {
                                 emit(StreamEvent.Token(content))
@@ -476,30 +487,11 @@ class LlmApiClient {
                             if (!tcs.isNullOrEmpty()) {
                                 emit(StreamEvent.Done(tcs))
                                 doneEmitted = true
-                                return@execute
                             }
                         }
                     } catch (_: Exception) {
                         // skip malformed chunks
                     }
-                }
-
-                // Fallback: try parsing whole body as non-streaming JSON
-                if (!hasSSEData && !doneEmitted) {
-                    try {
-                        val result = json.decodeFromString<ChatCompletionResponse>(fullText)
-                        val msg = result.choices.firstOrNull()?.message
-                        if (msg != null) {
-                            val c = msg.content
-                            if (!c.isNullOrEmpty()) emit(StreamEvent.Token(c))
-                            val tcs = msg.toolCalls
-                            if (!tcs.isNullOrEmpty()) {
-                                emit(StreamEvent.Done(tcs))
-                                doneEmitted = true
-                                return@execute
-                            }
-                        }
-                    } catch (_: Exception) {}
                 }
             }
 
