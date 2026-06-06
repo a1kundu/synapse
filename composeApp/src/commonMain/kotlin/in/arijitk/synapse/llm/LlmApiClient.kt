@@ -9,7 +9,6 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -193,6 +192,10 @@ class LlmApiClient {
      * platform-specific implementations:
      * - Android: token-by-token via ByteReadChannel
      * - Wasm/JS: full-text parsing via bodyAsText()
+     *
+     * Uses [preparePost] + [execute] instead of [post] to avoid Ktor's
+     * call.save() which buffers the entire response body, defeating
+     * incremental streaming on Android.
      */
     fun streamChatCompletion(
         model: LlmModel,
@@ -214,7 +217,11 @@ class LlmApiClient {
         )
 
         try {
-            val response: HttpResponse = client.post("$baseUrl/chat/completions") {
+            // preparePost returns an HttpStatement; execute{} keeps the
+            // connection open so bodyAsChannel() can stream incrementally.
+            // Using client.post() would call save() internally, buffering
+            // the entire body before returning — breaking token-by-token rendering.
+            client.preparePost("$baseUrl/chat/completions") {
                 contentType(ContentType.Application.Json)
                 header("Authorization", "Bearer $apiKey")
                 if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
@@ -222,22 +229,26 @@ class LlmApiClient {
                     header("X-Title", "Synapse")
                 }
                 setBody(request)
-            }
-
-            if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                val errorMessage = try {
-                    json.decodeFromString<ApiErrorResponse>(errorBody).error?.message
-                        ?: "HTTP ${response.status.value}"
-                } catch (_: Exception) {
-                    "HTTP ${response.status.value}: $errorBody"
+            }.execute { response ->
+                if (!response.status.isSuccess()) {
+                    val errorBody = response.bodyAsText()
+                    val errorMessage = try {
+                        json.decodeFromString<ApiErrorResponse>(errorBody).error?.message
+                            ?: "HTTP ${response.status.value}"
+                    } catch (_: Exception) {
+                        "HTTP ${response.status.value}: $errorBody"
+                    }
+                    emit("⚠️ Error: $errorMessage")
+                    return@execute
                 }
-                emit("⚠️ Error: $errorMessage")
-                return@flow
-            }
 
-            // Delegate SSE parsing to platform-specific implementation
-            emitAll(readSseStream(response, json))
+                // Delegate SSE parsing to platform-specific implementation.
+                // Must collect inside execute{} — the connection closes when
+                // execute returns.
+                readSseStream(response, json).collect { token ->
+                    emit(token)
+                }
+            }
         } catch (e: Exception) {
             emit("⚠️ Connection error: ${e.message ?: "Unknown error"}")
         }
