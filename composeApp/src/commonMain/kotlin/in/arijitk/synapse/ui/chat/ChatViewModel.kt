@@ -10,6 +10,7 @@ import `in`.arijitk.synapse.llm.ChatRequestMessage
 import `in`.arijitk.synapse.llm.LlmApiClient
 import `in`.arijitk.synapse.settings.SettingsRepository
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlin.random.Random
 
 /**
@@ -203,6 +204,12 @@ class ChatViewModel : ViewModel() {
                             content = builder.toString(),
                         )
                     }
+                    // Yield after each state update so Compose can recompose
+                    // between tokens. Without this, OkHttp's socket buffer
+                    // delivers multiple SSE events in a single TCP packet,
+                    // and readUTF8Line() returns them all without suspending
+                    // — the UI never gets a frame to render intermediate states.
+                    yield()
                 }
 
                 // Safety net: if streaming completed but produced no content,

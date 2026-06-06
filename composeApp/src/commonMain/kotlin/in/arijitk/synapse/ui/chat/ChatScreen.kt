@@ -396,15 +396,18 @@ private fun MessageBubble(message: ChatMessage) {
 
                 // Text content
                 if (message.content.isNotEmpty()) {
-                    if (isUser) {
-                        // Plain text for user messages
+                    if (isUser || message.isStreaming) {
+                        // Plain text for user messages and during streaming.
+                        // Using Text() while streaming keeps rendering cheap
+                        // so tokens appear incrementally in real time.
+                        // Markdown is rendered once streaming completes.
                         Text(
                             text = message.content,
                             style = MaterialTheme.typography.bodyMedium,
                             color = contentColor,
                         )
                     } else {
-                        // Markdown rendering for assistant messages
+                        // Full markdown rendering for completed assistant messages
                         Markdown(
                             content = message.content,
                             colors = markdownColor(
