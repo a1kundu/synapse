@@ -377,18 +377,8 @@ When you need to use a tool, the system will automatically invoke it for you via
         val toolNames = toolCalls.mapNotNull { it.function.name.takeIf { n -> n.isNotBlank() } }
         updateMessage(assistantId, "🔧 Calling tools: ${toolNames.joinToString(", ")}...", streaming = true)
 
-        val extendedHistory = originalHistory.toMutableList()
-
-        // Add the assistant's tool call message
-        extendedHistory.add(
-            ChatRequestMessage(
-                role = "assistant",
-                content = null,
-                toolCalls = toolCalls,
-            )
-        )
-
-        // Execute each tool call and add results
+        // Execute each tool call and collect results
+        val toolResults = mutableListOf<String>()
         for (call in toolCalls) {
             val toolName = call.function.name
             val serverTool = tools.find { it.tool.name == toolName }
@@ -410,16 +400,19 @@ When you need to use a tool, the system will automatically invoke it for you via
                 "Error: Tool '$toolName' not found"
             }
 
-            extendedHistory.add(
-                ChatRequestMessage(
-                    role = "tool",
-                    content = resultContent,
-                    toolCallId = call.id,
-                )
-            )
+            toolResults.add("Tool `$toolName` returned:\n$resultContent")
         }
 
-        // Stream final response (no tools this time to prevent infinite loop)
+        // Build follow-up history using plain user message (provider-compatible)
+        val extendedHistory = originalHistory.toMutableList()
+        extendedHistory.add(
+            ChatRequestMessage(
+                role = "user",
+                content = "[Tool Results]\n\n${toolResults.joinToString("\n\n---\n\n")}\n\nPlease use these tool results to answer my original question.",
+            )
+        )
+
+        // Stream final response (no tools to prevent infinite loop)
         streamWithToolCalling(assistantId, model, extendedHistory, openAiTools = null, mcpTools = emptyList())
     }
 
