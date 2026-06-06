@@ -10,7 +10,7 @@ import `in`.arijitk.synapse.llm.ChatRequestMessage
 import `in`.arijitk.synapse.llm.LlmApiClient
 import `in`.arijitk.synapse.llm.OpenAiFunction
 import `in`.arijitk.synapse.llm.OpenAiTool
-import `in`.arijitk.synapse.llm.ToolCallFunctionInfo
+import `in`.arijitk.synapse.llm.StreamEvent
 import `in`.arijitk.synapse.llm.ToolCallInfo
 import `in`.arijitk.synapse.mcp.McpClient
 import `in`.arijitk.synapse.mcp.McpServerTool
@@ -283,9 +283,8 @@ class ChatViewModel : ViewModel() {
                 // Build conversation history with system prompt
                 val conversationHistory = buildConversationHistory(assistantId, tools)
 
-                if (hasTools) {
-                    // Use non-streaming for tool-calling round
-                    val openAiTools = tools.map { serverTool ->
+                val openAiTools = if (hasTools) {
+                    tools.map { serverTool ->
                         OpenAiTool(
                             function = OpenAiFunction(
                                 name = serverTool.tool.name,
@@ -294,32 +293,10 @@ class ChatViewModel : ViewModel() {
                             )
                         )
                     }
+                } else null
 
-                    val result = apiClient.chatCompletionFull(
-                        model = currentModel,
-                        conversationHistory = conversationHistory,
-                        tools = openAiTools,
-                    )
-
-                    result.onSuccess { response ->
-                        val choice = response.choices.firstOrNull()
-                        val toolCalls = choice?.message?.toolCalls
-
-                        if (!toolCalls.isNullOrEmpty()) {
-                            // Execute tool calls and continue
-                            handleToolCalls(assistantId, currentModel, conversationHistory, choice.message!!, toolCalls, tools)
-                        } else {
-                            // No tool calls — display the text response
-                            val content = choice?.message?.content ?: "No response received."
-                            updateMessage(assistantId, content, streaming = false)
-                        }
-                    }.onFailure { error ->
-                        updateMessage(assistantId, "⚠️ Error: ${error.message}", streaming = false)
-                    }
-                } else {
-                    // No MCP tools — stream directly (existing behavior)
-                    streamResponse(assistantId, currentModel, conversationHistory)
-                }
+                // Stream with tool support
+                streamWithToolCalling(assistantId, currentModel, conversationHistory, openAiTools, tools)
             } catch (e: Exception) {
                 val idx = messages.indexOfFirst { it.id == assistantId }
                 if (idx >= 0) {
@@ -394,22 +371,19 @@ When you need to use a tool, the system will automatically invoke it for you via
         assistantId: String,
         model: LlmModel,
         originalHistory: List<ChatRequestMessage>,
-        assistantMessage: `in`.arijitk.synapse.llm.ResponseMessage,
         toolCalls: List<ToolCallInfo>,
         tools: List<McpServerTool>,
     ) {
-        // Show the tool calling status
         val toolNames = toolCalls.mapNotNull { it.function.name.takeIf { n -> n.isNotBlank() } }
         updateMessage(assistantId, "🔧 Calling tools: ${toolNames.joinToString(", ")}...", streaming = true)
 
-        // Build the extended conversation with tool results
         val extendedHistory = originalHistory.toMutableList()
 
         // Add the assistant's tool call message
         extendedHistory.add(
             ChatRequestMessage(
                 role = "assistant",
-                content = assistantMessage.content,
+                content = null,
                 toolCalls = toolCalls,
             )
         )
@@ -445,32 +419,50 @@ When you need to use a tool, the system will automatically invoke it for you via
             )
         }
 
-        // Get the final response by streaming
-        streamResponse(assistantId, model, extendedHistory)
+        // Stream final response (no tools this time to prevent infinite loop)
+        streamWithToolCalling(assistantId, model, extendedHistory, openAiTools = null, mcpTools = emptyList())
     }
 
     /**
-     * Stream a response from the LLM API.
+     * Stream a response from the LLM API, handling tool call deltas.
+     * If tool calls are detected, executes them and continues.
      */
-    private suspend fun streamResponse(
+    private suspend fun streamWithToolCalling(
         assistantId: String,
         model: LlmModel,
         conversationHistory: List<ChatRequestMessage>,
+        openAiTools: List<OpenAiTool>?,
+        mcpTools: List<McpServerTool>,
     ) {
-        val responseFlow = apiClient.streamChatCompletion(
+        val eventFlow = apiClient.streamWithTools(
             model = model,
             conversationHistory = conversationHistory,
+            tools = openAiTools,
         )
 
         val builder = StringBuilder()
-        responseFlow.collect { token ->
-            builder.append(token)
-            updateMessage(assistantId, builder.toString())
-            yield()
-        }
-
-        if (builder.isEmpty()) {
-            updateMessage(assistantId, "No response received from the model. Please try again.")
+        eventFlow.collect { event ->
+            when (event) {
+                is StreamEvent.Token -> {
+                    builder.append(event.text)
+                    updateMessage(assistantId, builder.toString())
+                    yield()
+                }
+                is StreamEvent.Done -> {
+                    val toolCalls = event.toolCalls
+                    if (toolCalls.isNotEmpty() && toolCalls.any { it.function.name.isNotBlank() }) {
+                        // LLM wants to call tools
+                        handleToolCalls(assistantId, model, conversationHistory, toolCalls, mcpTools)
+                    } else if (builder.isEmpty()) {
+                        updateMessage(assistantId, "No response received from the model. Please try again.")
+                    }
+                }
+                is StreamEvent.Error -> {
+                    if (builder.isEmpty()) {
+                        updateMessage(assistantId, "⚠️ Error: ${event.message}")
+                    }
+                }
+            }
         }
     }
 

@@ -136,6 +136,16 @@ data class ModelInfo(
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
+/** Events emitted from a streaming chat completion with tool support. */
+sealed class StreamEvent {
+    /** A text content token. */
+    data class Token(val text: String) : StreamEvent()
+    /** Streaming complete; the accumulated tool calls (if any). */
+    data class Done(val toolCalls: List<ToolCallInfo>) : StreamEvent()
+    /** An error. */
+    data class Error(val message: String) : StreamEvent()
+}
+
 class LlmApiClient {
 
     private val json = Json {
@@ -251,6 +261,7 @@ class LlmApiClient {
     fun streamChatCompletion(
         model: LlmModel,
         conversationHistory: List<ChatRequestMessage>,
+        tools: List<OpenAiTool>? = null,
     ): Flow<String> = flow {
         val settings = SettingsRepository.instance
         val baseUrl = settings.resolvedBaseUrl
@@ -265,6 +276,7 @@ class LlmApiClient {
             model = model.id,
             messages = conversationHistory,
             stream = true,
+            tools = tools?.takeIf { it.isNotEmpty() },
         )
 
         try {
@@ -303,6 +315,132 @@ class LlmApiClient {
         } catch (e: Exception) {
             emit("⚠️ Connection error: ${e.message ?: "Unknown error"}")
         }
+    }
+
+    /**
+     * Stream chat completion and emit [StreamEvent]s.
+     * Handles tool call deltas accumulated across SSE chunks.
+     */
+    fun streamWithTools(
+        model: LlmModel,
+        conversationHistory: List<ChatRequestMessage>,
+        tools: List<OpenAiTool>? = null,
+    ): Flow<StreamEvent> = flow {
+        val settings = SettingsRepository.instance
+        val baseUrl = settings.resolvedBaseUrl
+        val apiKey = settings.llmApiKey
+
+        if (apiKey.isBlank()) {
+            emit(StreamEvent.Error("API key not configured"))
+            return@flow
+        }
+
+        val request = ChatCompletionRequest(
+            model = model.id,
+            messages = conversationHistory,
+            stream = true,
+            tools = tools?.takeIf { it.isNotEmpty() },
+        )
+
+        // Accumulators for tool calls built from deltas
+        val toolCallMap = mutableMapOf<Int, MutableToolCall>()
+
+        try {
+            client.preparePost("$baseUrl/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
+                    header("HTTP-Referer", "https://synapse.arijitk.in")
+                    header("X-Title", "Synapse")
+                }
+                setBody(request)
+            }.execute { response ->
+                if (!response.status.isSuccess()) {
+                    val errorBody = response.bodyAsText()
+                    val errorMessage = try {
+                        json.decodeFromString<ApiErrorResponse>(errorBody).error?.message
+                            ?: "HTTP ${response.status.value}"
+                    } catch (_: Exception) {
+                        "HTTP ${response.status.value}: $errorBody"
+                    }
+                    emit(StreamEvent.Error(errorMessage))
+                    return@execute
+                }
+
+                // Parse SSE body
+                val fullText = response.bodyAsText()
+                for (line in fullText.lines()) {
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty() || !trimmed.startsWith("data:")) continue
+                    val data = trimmed.removePrefix("data:").trim()
+                    if (data == "[DONE]") break
+
+                    try {
+                        val chunk = json.decodeFromString<ChatCompletionResponse>(data)
+                        val delta = chunk.choices.firstOrNull()?.delta ?: continue
+
+                        // Emit text content
+                        val content = delta.content
+                        if (!content.isNullOrEmpty()) {
+                            emit(StreamEvent.Token(content))
+                        }
+
+                        // Accumulate tool call deltas
+                        delta.toolCalls?.forEach { tcd ->
+                            val tc = toolCallMap.getOrPut(tcd.index) { MutableToolCall() }
+                            tcd.id?.let { tc.id = it }
+                            tcd.type?.let { tc.type = it }
+                            tcd.function?.name?.let { tc.name += it }
+                            tcd.function?.arguments?.let { tc.arguments += it }
+                        }
+                    } catch (_: Exception) {
+                        // skip malformed chunks
+                    }
+                }
+
+                // Fallback: try non-streaming parse if no events emitted
+                if (toolCallMap.isEmpty()) {
+                    try {
+                        val result = json.decodeFromString<ChatCompletionResponse>(fullText)
+                        val msg = result.choices.firstOrNull()?.message
+                        if (msg != null) {
+                            val c = msg.content
+                            if (!c.isNullOrEmpty()) emit(StreamEvent.Token(c))
+                            val tcs = msg.toolCalls
+                            if (!tcs.isNullOrEmpty()) {
+                                emit(StreamEvent.Done(tcs))
+                                return@execute
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            // Emit completed tool calls
+            val finalToolCalls = toolCallMap.entries
+                .sortedBy { it.key }
+                .map { (_, tc) ->
+                    ToolCallInfo(
+                        id = tc.id,
+                        type = tc.type,
+                        function = ToolCallFunctionInfo(
+                            name = tc.name,
+                            arguments = tc.arguments,
+                        )
+                    )
+                }
+            emit(StreamEvent.Done(finalToolCalls))
+        } catch (e: Exception) {
+            emit(StreamEvent.Error("Connection error: ${e.message ?: "Unknown error"}"))
+        }
+    }
+
+    /** Mutable accumulator for a tool call being built from stream deltas. */
+    private class MutableToolCall {
+        var id: String = ""
+        var type: String = "function"
+        var name: String = ""
+        var arguments: String = ""
     }
 
     /**
