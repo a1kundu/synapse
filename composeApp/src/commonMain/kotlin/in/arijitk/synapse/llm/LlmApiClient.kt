@@ -9,6 +9,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -188,7 +189,10 @@ class LlmApiClient {
 
     /**
      * Send a chat completion request and stream back tokens via SSE.
-     * Reads the response body incrementally line-by-line using bodyAsChannel().
+     * Delegates response parsing to [readSseStream] which has
+     * platform-specific implementations:
+     * - Android: token-by-token via ByteReadChannel
+     * - Wasm/JS: full-text parsing via bodyAsText()
      */
     fun streamChatCompletion(
         model: LlmModel,
@@ -232,51 +236,8 @@ class LlmApiClient {
                 return@flow
             }
 
-            // Read the full response text and parse SSE events.
-            // Using bodyAsText() instead of bodyAsChannel().readUTF8Line()
-            // for reliable cross-platform support (Wasm/JS Fetch API may not
-            // stream ByteReadChannel correctly).
-            val fullText = response.bodyAsText()
-            var hasEmittedContent = false
-
-            for (line in fullText.lines()) {
-                val trimmed = line.trim()
-                if (trimmed.isEmpty()) continue
-                if (!trimmed.startsWith("data:")) continue
-                val data = trimmed.removePrefix("data:").trim()
-                if (data == "[DONE]") break
-
-                try {
-                    val chunk = json.decodeFromString<ChatCompletionResponse>(data)
-                    val content = chunk.choices.firstOrNull()?.delta?.content
-                    if (!content.isNullOrEmpty()) {
-                        emit(content)
-                        hasEmittedContent = true
-                    }
-                } catch (_: Exception) {
-                    // Skip malformed SSE chunks
-                }
-            }
-
-            // Fallback: if SSE parsing yielded nothing, try as a regular
-            // (non-streaming) JSON response — some providers may ignore the
-            // stream flag and return a single JSON object.
-            if (!hasEmittedContent) {
-                try {
-                    val result = json.decodeFromString<ChatCompletionResponse>(fullText)
-                    val content = result.choices.firstOrNull()?.message?.content
-                    if (!content.isNullOrEmpty()) {
-                        emit(content)
-                        hasEmittedContent = true
-                    }
-                } catch (_: Exception) {
-                    // Not a valid non-streaming response either
-                }
-            }
-
-            if (!hasEmittedContent) {
-                emit("No response content received from the model.")
-            }
+            // Delegate SSE parsing to platform-specific implementation
+            emitAll(readSseStream(response, json))
         } catch (e: Exception) {
             emit("⚠️ Connection error: ${e.message ?: "Unknown error"}")
         }
