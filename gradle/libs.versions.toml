@@ -5,6 +5,7 @@ compose-multiplatform = "1.7.3"
 kotlinx-coroutines = "1.9.0"
 kotlinx-serialization = "1.7.3"
 ktor = "3.0.3"
+markdown-renderer = "0.29.0"
 
 androidx-activityCompose = "1.9.3"
 androidx-core = "1.15.0"
@@ -26,6 +27,10 @@ ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-conte
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-js = { group = "io.ktor", name = "ktor-client-js", version.ref = "ktor" }
+
+markdown-renderer = { group = "com.mikepenz", name = "multiplatform-markdown-renderer", version.ref = "markdown-renderer" }
+markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }
+markdown-renderer-code = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-code", version.ref = "markdown-renderer" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

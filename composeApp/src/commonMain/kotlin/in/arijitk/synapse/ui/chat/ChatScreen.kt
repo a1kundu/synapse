@@ -35,6 +35,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
 
 /**
  * Main Chat screen composable.
@@ -368,7 +371,10 @@ private fun MessageBubble(message: ChatMessage) {
                 bottomEnd = if (isUser) 4.dp else 16.dp,
             ),
             color = bubbleColor,
-            modifier = Modifier.widthIn(min = 60.dp, max = 340.dp),
+            modifier = Modifier.widthIn(
+                min = 60.dp,
+                max = if (isUser) 340.dp else 520.dp,
+            ),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 // Attachments
@@ -383,11 +389,53 @@ private fun MessageBubble(message: ChatMessage) {
 
                 // Text content
                 if (message.content.isNotEmpty()) {
-                    Text(
-                        text = message.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = contentColor,
-                    )
+                    if (isUser) {
+                        // Plain text for user messages
+                        Text(
+                            text = message.content,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = contentColor,
+                        )
+                    } else {
+                        // Markdown rendering for assistant messages
+                        Markdown(
+                            content = message.content,
+                            colors = markdownColor(
+                                text = contentColor,
+                                codeText = contentColor,
+                                inlineCodeText = contentColor,
+                                linkText = MaterialTheme.colorScheme.primary,
+                                codeBackground = contentColor.copy(alpha = 0.08f),
+                                inlineCodeBackground = contentColor.copy(alpha = 0.08f),
+                                dividerColor = contentColor.copy(alpha = 0.2f),
+                            ),
+                            typography = markdownTypography(
+                                h1 = MaterialTheme.typography.titleLarge.copy(color = contentColor),
+                                h2 = MaterialTheme.typography.titleMedium.copy(color = contentColor),
+                                h3 = MaterialTheme.typography.titleSmall.copy(color = contentColor),
+                                h4 = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = contentColor,
+                                ),
+                                h5 = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = contentColor,
+                                ),
+                                h6 = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = contentColor,
+                                ),
+                                paragraph = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+                                quote = MaterialTheme.typography.bodyMedium.copy(
+                                    color = contentColor.copy(alpha = 0.7f),
+                                ),
+                                code = MaterialTheme.typography.bodySmall.copy(color = contentColor),
+                                list = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+                                ordered = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+                                bullet = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+                            ),
+                        )
+                    }
                 } else if (!message.isStreaming) {
                     // Fallback for empty non-streaming messages — prevents
                     // the bubble from collapsing to an invisible dot.
