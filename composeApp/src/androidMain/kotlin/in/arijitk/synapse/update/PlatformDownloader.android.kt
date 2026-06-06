@@ -86,55 +86,61 @@ actual class PlatformDownloader actual constructor() {
                     alreadyReceived = 0
                 }
 
-                val response: HttpResponse = client.get(update.downloadUrl) {
+                // Use prepareGet().execute {} to STREAM the response body from
+                // the network in real time.  A plain client.get() buffers the
+                // entire body in memory first, which is why the progress bar
+                // was stuck at indeterminate and then jumped to 100%.
+                val statement = client.prepareGet(update.downloadUrl) {
                     if (alreadyReceived > 0) {
                         header("Range", "bytes=$alreadyReceived-")
                     }
                 }
 
-                // Server ignored Range header → restart from scratch
-                if (response.status.value == 200 && alreadyReceived > 0) {
-                    partFile.delete()
-                    alreadyReceived = 0
-                }
+                statement.execute { response ->
+                    // Server ignored Range header → restart from scratch
+                    if (response.status.value == 200 && alreadyReceived > 0) {
+                        partFile.delete()
+                        alreadyReceived = 0
+                    }
 
-                if (response.status.value !in listOf(200, 206)) {
-                    throw Exception("Download failed: HTTP ${response.status.value}")
-                }
+                    if (response.status.value !in listOf(200, 206)) {
+                        throw Exception("Download failed: HTTP ${response.status.value}")
+                    }
 
-                val bodyChannel = response.bodyAsChannel()
-                val output = FileOutputStream(partFile, alreadyReceived > 0)
-                val buffer = ByteArray(8192)
-                var received = alreadyReceived
+                    val bodyChannel = response.bodyAsChannel()
+                    val output = FileOutputStream(partFile, alreadyReceived > 0)
+                    val buffer = ByteArray(8192)
+                    var received = alreadyReceived
 
-                output.use { out ->
-                    while (!bodyChannel.isClosedForRead) {
-                        if (cancelled || !coroutineContext.isActive) {
-                            throw Exception("Download cancelled")
-                        }
-                        val read = bodyChannel.readAvailable(buffer)
-                        if (read == -1) break
-                        if (read > 0) {
-                            out.write(buffer, 0, read)
-                            received += read
-                            onProgress(received, totalBytes)
+                    output.use { out ->
+                        while (!bodyChannel.isClosedForRead) {
+                            if (cancelled || !coroutineContext.isActive) {
+                                throw Exception("Download cancelled")
+                            }
+                            val read = bodyChannel.readAvailable(buffer)
+                            if (read == -1) break
+                            if (read > 0) {
+                                out.write(buffer, 0, read)
+                                received += read
+                                onProgress(received, totalBytes)
+                            }
                         }
                     }
-                }
 
-                // Verify completeness
-                if (totalBytes > 0 && received < totalBytes) {
-                    throw Exception("Incomplete download ($received / $totalBytes bytes)")
-                }
-                val partLen = partFile.length()
-                if (totalBytes > 0 && partLen != totalBytes) {
-                    partFile.delete()
-                    throw Exception("File verification failed (disk: $partLen, expected: $totalBytes)")
-                }
+                    // Verify completeness
+                    if (totalBytes > 0 && received < totalBytes) {
+                        throw Exception("Incomplete download ($received / $totalBytes bytes)")
+                    }
+                    val partLen = partFile.length()
+                    if (totalBytes > 0 && partLen != totalBytes) {
+                        partFile.delete()
+                        throw Exception("File verification failed (disk: $partLen, expected: $totalBytes)")
+                    }
 
-                // Rename .part → final APK
-                partFile.renameTo(file)
-                onProgress(totalBytes, totalBytes)
+                    // Rename .part → final APK
+                    partFile.renameTo(file)
+                    onProgress(totalBytes, totalBytes)
+                }
                 return@withContext
             } catch (e: Exception) {
                 if (e.message?.contains("cancelled", ignoreCase = true) == true) throw e
