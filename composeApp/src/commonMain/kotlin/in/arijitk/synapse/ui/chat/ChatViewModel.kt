@@ -436,6 +436,8 @@ When you need to use a tool, the system will automatically invoke it for you via
     /**
      * Stream a response from the LLM API, handling tool call deltas.
      * If tool calls are detected, executes them and continues.
+     * If the model/backend rejects tool calling (e.g. tool_choice error),
+     * automatically retries without tools so the chat still works.
      */
     private suspend fun streamWithToolCalling(
         assistantId: String,
@@ -452,6 +454,7 @@ When you need to use a tool, the system will automatically invoke it for you via
 
         val builder = StringBuilder()
         var toolCallHandled = false
+        var retryWithoutTools = false
         eventFlow.collect { event ->
             when (event) {
                 is StreamEvent.Token -> {
@@ -470,10 +473,31 @@ When you need to use a tool, the system will automatically invoke it for you via
                     }
                 }
                 is StreamEvent.Error -> {
-                    updateMessage(assistantId, "⚠️ Error: ${event.message}", streaming = false)
+                    // If the error is about tool_choice / tool calling not being supported,
+                    // retry without tools so the chat still works.
+                    if (openAiTools != null && isToolCallUnsupportedError(event.message)) {
+                        retryWithoutTools = true
+                    } else {
+                        updateMessage(assistantId, "\u26a0\ufe0f Error: ${event.message}", streaming = false)
+                    }
                 }
             }
         }
+
+        if (retryWithoutTools) {
+            // Retry the same request without tools
+            streamWithToolCalling(assistantId, model, conversationHistory, openAiTools = null, mcpTools = emptyList())
+        }
+    }
+
+    /** Check if an API error indicates the backend doesn't support tool calling. */
+    private fun isToolCallUnsupportedError(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("tool_choice") ||
+            lower.contains("tool choice") ||
+            lower.contains("enable-auto-tool-choice") ||
+            lower.contains("tool-call-parser") ||
+            lower.contains("tools are not supported")
     }
 
     private fun updateMessage(id: String, content: String, streaming: Boolean? = null) {
