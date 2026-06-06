@@ -27,6 +27,8 @@ import `in`.arijitk.synapse.UpdateDialogController
 import `in`.arijitk.synapse.isAndroid
 import `in`.arijitk.synapse.isDebug
 import `in`.arijitk.synapse.openUrl
+import `in`.arijitk.synapse.mcp.McpServerConfig
+import `in`.arijitk.synapse.mcp.McpTransportType
 import `in`.arijitk.synapse.settings.LlmProvider
 import `in`.arijitk.synapse.settings.SettingsRepository
 import `in`.arijitk.synapse.theme.ThemeMode
@@ -60,6 +62,10 @@ fun SettingsScreen(
     var llmApiKey by remember { mutableStateOf(settings.llmApiKey) }
     var llmServerUrl by remember { mutableStateOf(settings.llmServerUrl) }
     var showApiKey by remember { mutableStateOf(false) }
+
+    // MCP servers
+    var mcpServers by remember { mutableStateOf(settings.mcpServers) }
+    var showAddMcpDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -270,6 +276,86 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(12.dp),
                         )
                     }
+                }
+
+                // ── MCP Servers ─────────────────────────────────────────
+                Spacer(Modifier.height(8.dp))
+                SectionHeader("MCP Servers")
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        if (mcpServers.isEmpty()) {
+                            ListItem(
+                                headlineContent = { Text("No MCP servers configured") },
+                                supportingContent = { Text("Add servers to enable tool calling in chat") },
+                                leadingContent = {
+                                    IconBox(
+                                        icon = Icons.Outlined.Extension,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                            )
+                        } else {
+                            mcpServers.forEach { server ->
+                                ListItem(
+                                    headlineContent = { Text(server.name) },
+                                    supportingContent = {
+                                        Text(
+                                            "${server.type.name.replace('_', ' ')} · ${server.url}",
+                                            maxLines = 1,
+                                        )
+                                    },
+                                    leadingContent = {
+                                        IconBox(
+                                            icon = Icons.Outlined.Extension,
+                                            color = MaterialTheme.colorScheme.secondary,
+                                        )
+                                    },
+                                    trailingContent = {
+                                        IconButton(onClick = {
+                                            settings.removeMcpServer(server.name)
+                                            mcpServers = settings.mcpServers
+                                        }) {
+                                            Icon(
+                                                Icons.Outlined.Delete,
+                                                contentDescription = "Remove",
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                        }
+
+                        // Add button
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "Add MCP Server",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            },
+                            leadingContent = {
+                                IconBox(
+                                    icon = Icons.Filled.Add,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                            modifier = Modifier.clickable { showAddMcpDialog = true },
+                        )
+                    }
+                }
+
+                if (showAddMcpDialog) {
+                    AddMcpServerDialog(
+                        onDismiss = { showAddMcpDialog = false },
+                        onAdd = { server ->
+                            settings.addMcpServer(server)
+                            mcpServers = settings.mcpServers
+                            showAddMcpDialog = false
+                        },
+                    )
                 }
 
                 // ── Updates (Android only) ──────────────────────────────
@@ -545,4 +631,114 @@ private fun CheckingUpdateOverlay() {
     ) {
         CircularProgressIndicator()
     }
+}
+
+// ── Add MCP Server Dialog ───────────────────────────────────────────────────
+
+@Composable
+private fun AddMcpServerDialog(
+    onDismiss: () -> Unit,
+    onAdd: (McpServerConfig) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    var transportType by remember { mutableStateOf(McpTransportType.HTTP_STREAMABLE) }
+    var nameError by remember { mutableStateOf<String?>(null) }
+    var urlError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add MCP Server") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; nameError = null },
+                    label = { Text("Name") },
+                    placeholder = { Text("e.g. My Tools Server") },
+                    singleLine = true,
+                    isError = nameError != null,
+                    supportingText = nameError?.let { { Text(it) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
+
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it; urlError = null },
+                    label = { Text("Server URL") },
+                    placeholder = { Text("https://example.com/mcp") },
+                    singleLine = true,
+                    isError = urlError != null,
+                    supportingText = urlError?.let { { Text(it) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
+
+                Text(
+                    text = "Transport Type",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    McpTransportType.entries.forEach { type ->
+                        FilterChip(
+                            selected = transportType == type,
+                            onClick = { transportType = type },
+                            label = {
+                                Text(
+                                    when (type) {
+                                        McpTransportType.HTTP_STREAMABLE -> "HTTP Streamable"
+                                        McpTransportType.SSE -> "SSE"
+                                    }
+                                )
+                            },
+                            leadingIcon = if (transportType == type) {
+                                {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            } else null,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // Validate
+                    val trimName = name.trim()
+                    val trimUrl = url.trim()
+                    var valid = true
+
+                    if (trimName.isBlank()) {
+                        nameError = "Name is required"
+                        valid = false
+                    }
+                    if (trimUrl.isBlank()) {
+                        urlError = "URL is required"
+                        valid = false
+                    } else if (!trimUrl.startsWith("http://") && !trimUrl.startsWith("https://")) {
+                        urlError = "Must start with http:// or https://"
+                        valid = false
+                    }
+
+                    if (valid) {
+                        onAdd(McpServerConfig(name = trimName, url = trimUrl, type = transportType))
+                    }
+                },
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }

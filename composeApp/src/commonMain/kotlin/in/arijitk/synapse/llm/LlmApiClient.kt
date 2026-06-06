@@ -19,7 +19,11 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class ChatRequestMessage(
     val role: String,
-    val content: String,
+    val content: String? = null,
+    @SerialName("tool_call_id")
+    val toolCallId: String? = null,
+    @SerialName("tool_calls")
+    val toolCalls: List<ToolCallInfo>? = null,
 )
 
 @Serializable
@@ -28,6 +32,7 @@ data class ChatCompletionRequest(
     val messages: List<ChatRequestMessage>,
     val stream: Boolean = true,
     val temperature: Double = 0.7,
+    val tools: List<OpenAiTool>? = null,
 )
 
 @Serializable
@@ -48,13 +53,59 @@ data class Choice(
 @Serializable
 data class ResponseMessage(
     val role: String = "",
-    val content: String = "",
+    val content: String? = null,
+    @SerialName("tool_calls")
+    val toolCalls: List<ToolCallInfo>? = null,
 )
 
 @Serializable
 data class DeltaContent(
     val role: String? = null,
     val content: String? = null,
+    @SerialName("tool_calls")
+    val toolCalls: List<ToolCallDelta>? = null,
+)
+
+// ── Tool calling models ─────────────────────────────────────────────────────
+
+@Serializable
+data class OpenAiTool(
+    val type: String = "function",
+    val function: OpenAiFunction,
+)
+
+@Serializable
+data class OpenAiFunction(
+    val name: String,
+    val description: String = "",
+    val parameters: kotlinx.serialization.json.JsonElement? = null,
+)
+
+@Serializable
+data class ToolCallInfo(
+    val id: String = "",
+    val type: String = "function",
+    val function: ToolCallFunctionInfo = ToolCallFunctionInfo(),
+)
+
+@Serializable
+data class ToolCallFunctionInfo(
+    val name: String = "",
+    val arguments: String = "",
+)
+
+@Serializable
+data class ToolCallDelta(
+    val index: Int = 0,
+    val id: String? = null,
+    val type: String? = null,
+    val function: ToolCallFunctionDelta? = null,
+)
+
+@Serializable
+data class ToolCallFunctionDelta(
+    val name: String? = null,
+    val arguments: String? = null,
 )
 
 @Serializable
@@ -251,6 +302,59 @@ class LlmApiClient {
             }
         } catch (e: Exception) {
             emit("⚠️ Connection error: ${e.message ?: "Unknown error"}")
+        }
+    }
+
+    /**
+     * Non-streaming chat completion with optional tool calling support.
+     * Returns the full parsed response for tool call handling.
+     */
+    suspend fun chatCompletionFull(
+        model: LlmModel,
+        conversationHistory: List<ChatRequestMessage>,
+        tools: List<OpenAiTool>? = null,
+    ): Result<ChatCompletionResponse> {
+        val settings = SettingsRepository.instance
+        val baseUrl = settings.resolvedBaseUrl
+        val apiKey = settings.llmApiKey
+
+        if (apiKey.isBlank()) {
+            return Result.failure(Exception("API key not configured"))
+        }
+
+        val request = ChatCompletionRequest(
+            model = model.id,
+            messages = conversationHistory,
+            stream = false,
+            tools = tools?.takeIf { it.isNotEmpty() },
+        )
+
+        return try {
+            val response: HttpResponse = client.post("$baseUrl/chat/completions") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $apiKey")
+                if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
+                    header("HTTP-Referer", "https://synapse.arijitk.in")
+                    header("X-Title", "Synapse")
+                }
+                setBody(request)
+            }
+
+            if (!response.status.isSuccess()) {
+                val errorBody = response.bodyAsText()
+                val errorMessage = try {
+                    json.decodeFromString<ApiErrorResponse>(errorBody).error?.message
+                        ?: "HTTP ${response.status.value}"
+                } catch (_: Exception) {
+                    "HTTP ${response.status.value}: $errorBody"
+                }
+                return Result.failure(Exception(errorMessage))
+            }
+
+            val body = response.bodyAsText()
+            Result.success(json.decodeFromString<ChatCompletionResponse>(body))
+        } catch (e: Exception) {
+            Result.failure(Exception("Connection error: ${e.message}"))
         }
     }
 

@@ -1,7 +1,10 @@
 package `in`.arijitk.synapse.settings
 
+import `in`.arijitk.synapse.mcp.McpServerConfig
+import `in`.arijitk.synapse.mcp.McpTransportType
 import `in`.arijitk.synapse.theme.ThemeMode
 import `in`.arijitk.synapse.theme.ThemeSettings
+import kotlinx.serialization.json.Json
 
 /**
  * Platform-specific key-value persistence.
@@ -38,6 +41,7 @@ class SettingsRepository(
         private const val KEY_LLM_PROVIDER = "llm_provider"
         private const val KEY_LLM_API_KEY = "llm_api_key"
         private const val KEY_LLM_SERVER_URL = "llm_server_url"
+        private const val KEY_MCP_SERVERS = "mcp_servers_json"
 
         private var _instance: SettingsRepository? = null
         val instance: SettingsRepository
@@ -97,6 +101,39 @@ class SettingsRepository(
         set(value) {
             prefs.putString(KEY_LLM_SERVER_URL, value)
         }
+
+    // ── MCP Servers ─────────────────────────────────────────────────────────
+
+    private val mcpJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    /** Raw JSON array of MCP server configs. */
+    private var mcpServersJson: String
+        get() = prefs.getString(KEY_MCP_SERVERS, "[]")
+        set(value) {
+            prefs.putString(KEY_MCP_SERVERS, value)
+        }
+
+    /** Parsed list of MCP server configs. */
+    var mcpServers: List<McpServerConfig>
+        get() = try {
+            mcpJson.decodeFromString<List<McpServerConfig>>(mcpServersJson)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        set(value) {
+            mcpServersJson = mcpJson.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(McpServerConfig.serializer()),
+                value,
+            )
+        }
+
+    fun addMcpServer(server: McpServerConfig) {
+        mcpServers = mcpServers + server
+    }
+
+    fun removeMcpServer(name: String) {
+        mcpServers = mcpServers.filter { it.name != name }
+    }
 
     /** Resolved base URL: custom if set, otherwise provider default. */
     val resolvedBaseUrl: String

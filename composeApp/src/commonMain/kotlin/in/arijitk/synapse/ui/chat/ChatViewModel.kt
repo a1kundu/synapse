@@ -8,9 +8,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import `in`.arijitk.synapse.llm.ChatRequestMessage
 import `in`.arijitk.synapse.llm.LlmApiClient
+import `in`.arijitk.synapse.llm.OpenAiFunction
+import `in`.arijitk.synapse.llm.OpenAiTool
+import `in`.arijitk.synapse.llm.ToolCallFunctionInfo
+import `in`.arijitk.synapse.llm.ToolCallInfo
+import `in`.arijitk.synapse.mcp.McpClient
+import `in`.arijitk.synapse.mcp.McpServerTool
 import `in`.arijitk.synapse.settings.SettingsRepository
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlin.random.Random
 
 /**
@@ -52,9 +60,23 @@ class ChatViewModel : ViewModel() {
     /** Current text in the input field (managed here for clearing on send). */
     var inputText by mutableStateOf("")
 
+    // ── MCP tools ───────────────────────────────────────────────────────────
+
+    private val mcpClient = McpClient()
+    private val mcpJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    /** Discovered MCP tools from all configured servers. */
+    val mcpTools = mutableStateListOf<McpServerTool>()
+
+    /** Whether MCP tools are being loaded. */
+    var isLoadingMcpTools by mutableStateOf(false)
+        private set
+
     init {
         // Auto-fetch models if API key is configured
         refreshModels()
+        // Discover MCP tools from configured servers
+        refreshMcpTools()
     }
 
     fun onInputTextChange(text: String) {
@@ -98,6 +120,34 @@ class ChatViewModel : ViewModel() {
         pendingAttachments.add(attachment)
     }
 
+    /**
+     * Refresh MCP tools from all configured servers.
+     */
+    fun refreshMcpTools() {
+        val servers = SettingsRepository.instance.mcpServers
+        if (servers.isEmpty()) {
+            mcpTools.clear()
+            return
+        }
+
+        isLoadingMcpTools = true
+        viewModelScope.launch {
+            val allTools = mutableListOf<McpServerTool>()
+            for (server in servers) {
+                mcpClient.discoverTools(server)
+                    .onSuccess { tools ->
+                        tools.forEach { tool ->
+                            allTools.add(McpServerTool(server.name, server, tool))
+                        }
+                    }
+                    .onFailure { /* silently skip failed servers */ }
+            }
+            mcpTools.clear()
+            mcpTools.addAll(allTools)
+            isLoadingMcpTools = false
+        }
+    }
+
     fun removeAttachment(index: Int) {
         if (index in pendingAttachments.indices) {
             pendingAttachments.removeAt(index)
@@ -133,7 +183,6 @@ class ChatViewModel : ViewModel() {
         val settings = SettingsRepository.instance
 
         if (!settings.isLlmConfigured) {
-            // No API key — show a helpful message
             val assistantId = generateId()
             messages.add(
                 ChatMessage(
@@ -162,65 +211,56 @@ class ChatViewModel : ViewModel() {
         )
         messages.add(streamingMessage)
 
-        // Build conversation history for API
-        val conversationHistory = messages
-            .filter { it.id != assistantId }
-            .map { msg ->
-                ChatRequestMessage(
-                    role = when (msg.role) {
-                        MessageRole.USER -> "user"
-                        MessageRole.ASSISTANT -> "assistant"
-                    },
-                    content = msg.content,
-                )
-            }
-
         viewModelScope.launch {
             try {
                 if (currentModel == null) {
-                    val idx = messages.indexOfFirst { it.id == assistantId }
-                    if (idx >= 0) {
-                        messages[idx] = messages[idx].copy(
-                            content = "⚠️ No model selected. Fetch models first.",
-                            isStreaming = false,
-                        )
-                    }
+                    updateMessage(assistantId, "⚠️ No model selected. Fetch models first.", streaming = false)
                     isGenerating = false
                     return@launch
                 }
 
-                // Stream tokens from the LLM API
-                val responseFlow = apiClient.streamChatCompletion(
-                    model = currentModel,
-                    conversationHistory = conversationHistory,
-                )
+                val tools = mcpTools.toList()
+                val hasTools = tools.isNotEmpty()
 
-                val builder = StringBuilder()
-                responseFlow.collect { token ->
-                    builder.append(token)
-                    val idx = messages.indexOfFirst { it.id == assistantId }
-                    if (idx >= 0) {
-                        messages[idx] = messages[idx].copy(
-                            content = builder.toString(),
+                // Build conversation history with system prompt
+                val conversationHistory = buildConversationHistory(assistantId, tools)
+
+                if (hasTools) {
+                    // Use non-streaming for tool-calling round
+                    val openAiTools = tools.map { serverTool ->
+                        OpenAiTool(
+                            function = OpenAiFunction(
+                                name = serverTool.tool.name,
+                                description = serverTool.tool.description ?: "",
+                                parameters = serverTool.tool.inputSchema,
+                            )
                         )
                     }
-                    // Yield after each state update so Compose can recompose
-                    // between tokens. Without this, OkHttp's socket buffer
-                    // delivers multiple SSE events in a single TCP packet,
-                    // and readUTF8Line() returns them all without suspending
-                    // — the UI never gets a frame to render intermediate states.
-                    yield()
-                }
 
-                // Safety net: if streaming completed but produced no content,
-                // show a user-visible message instead of leaving the bubble empty.
-                if (builder.isEmpty()) {
-                    val idx = messages.indexOfFirst { it.id == assistantId }
-                    if (idx >= 0) {
-                        messages[idx] = messages[idx].copy(
-                            content = "No response received from the model. Please try again.",
-                        )
+                    val result = apiClient.chatCompletionFull(
+                        model = currentModel,
+                        conversationHistory = conversationHistory,
+                        tools = openAiTools,
+                    )
+
+                    result.onSuccess { response ->
+                        val choice = response.choices.firstOrNull()
+                        val toolCalls = choice?.message?.toolCalls
+
+                        if (!toolCalls.isNullOrEmpty()) {
+                            // Execute tool calls and continue
+                            handleToolCalls(assistantId, currentModel, conversationHistory, choice.message!!, toolCalls, tools)
+                        } else {
+                            // No tool calls — display the text response
+                            val content = choice?.message?.content ?: "No response received."
+                            updateMessage(assistantId, content, streaming = false)
+                        }
+                    }.onFailure { error ->
+                        updateMessage(assistantId, "⚠️ Error: ${error.message}", streaming = false)
                     }
+                } else {
+                    // No MCP tools — stream directly (existing behavior)
+                    streamResponse(assistantId, currentModel, conversationHistory)
                 }
             } catch (e: Exception) {
                 val idx = messages.indexOfFirst { it.id == assistantId }
@@ -231,12 +271,158 @@ class ChatViewModel : ViewModel() {
                     )
                 }
             } finally {
-                // Mark streaming complete
                 val idx = messages.indexOfFirst { it.id == assistantId }
                 if (idx >= 0) {
                     messages[idx] = messages[idx].copy(isStreaming = false)
                 }
                 isGenerating = false
+            }
+        }
+    }
+
+    /**
+     * Build conversation history including system prompt with MCP tools.
+     */
+    private fun buildConversationHistory(
+        excludeId: String,
+        tools: List<McpServerTool>,
+    ): List<ChatRequestMessage> {
+        val history = mutableListOf<ChatRequestMessage>()
+
+        // System prompt with MCP tool descriptions
+        if (tools.isNotEmpty()) {
+            val toolDescriptions = tools.joinToString("\n\n") { serverTool ->
+                val schema = serverTool.tool.inputSchema?.toString() ?: "{}"
+                "- **${serverTool.tool.name}** (server: ${serverTool.serverName}): " +
+                    "${serverTool.tool.description ?: "No description"}\n" +
+                    "  Input schema: $schema"
+            }
+
+            history.add(
+                ChatRequestMessage(
+                    role = "system",
+                    content = """You have access to the following tools via MCP (Model Context Protocol) servers. Use them when appropriate to help the user.
+
+Available tools:
+$toolDescriptions
+
+When you need to use a tool, the system will automatically invoke it for you via function calling.""",
+                )
+            )
+        }
+
+        // Add conversation messages
+        history.addAll(
+            messages
+                .filter { it.id != excludeId }
+                .map { msg ->
+                    ChatRequestMessage(
+                        role = when (msg.role) {
+                            MessageRole.USER -> "user"
+                            MessageRole.ASSISTANT -> "assistant"
+                        },
+                        content = msg.content,
+                    )
+                }
+        )
+
+        return history
+    }
+
+    /**
+     * Execute MCP tool calls and continue the conversation.
+     */
+    private suspend fun handleToolCalls(
+        assistantId: String,
+        model: LlmModel,
+        originalHistory: List<ChatRequestMessage>,
+        assistantMessage: `in`.arijitk.synapse.llm.ResponseMessage,
+        toolCalls: List<ToolCallInfo>,
+        tools: List<McpServerTool>,
+    ) {
+        // Show the tool calling status
+        val toolNames = toolCalls.mapNotNull { it.function.name.takeIf { n -> n.isNotBlank() } }
+        updateMessage(assistantId, "🔧 Calling tools: ${toolNames.joinToString(", ")}...", streaming = true)
+
+        // Build the extended conversation with tool results
+        val extendedHistory = originalHistory.toMutableList()
+
+        // Add the assistant's tool call message
+        extendedHistory.add(
+            ChatRequestMessage(
+                role = "assistant",
+                content = assistantMessage.content,
+                toolCalls = toolCalls,
+            )
+        )
+
+        // Execute each tool call and add results
+        for (call in toolCalls) {
+            val toolName = call.function.name
+            val serverTool = tools.find { it.tool.name == toolName }
+
+            val resultContent = if (serverTool != null) {
+                try {
+                    val args = try {
+                        mcpJson.decodeFromString<JsonObject>(call.function.arguments)
+                    } catch (_: Exception) {
+                        JsonObject(emptyMap())
+                    }
+
+                    mcpClient.callTool(serverTool.serverConfig, toolName, args)
+                        .getOrElse { "Error: ${it.message}" }
+                } catch (e: Exception) {
+                    "Error executing tool: ${e.message}"
+                }
+            } else {
+                "Error: Tool '$toolName' not found"
+            }
+
+            extendedHistory.add(
+                ChatRequestMessage(
+                    role = "tool",
+                    content = resultContent,
+                    toolCallId = call.id,
+                )
+            )
+        }
+
+        // Get the final response by streaming
+        streamResponse(assistantId, model, extendedHistory)
+    }
+
+    /**
+     * Stream a response from the LLM API.
+     */
+    private suspend fun streamResponse(
+        assistantId: String,
+        model: LlmModel,
+        conversationHistory: List<ChatRequestMessage>,
+    ) {
+        val responseFlow = apiClient.streamChatCompletion(
+            model = model,
+            conversationHistory = conversationHistory,
+        )
+
+        val builder = StringBuilder()
+        responseFlow.collect { token ->
+            builder.append(token)
+            updateMessage(assistantId, builder.toString())
+            yield()
+        }
+
+        if (builder.isEmpty()) {
+            updateMessage(assistantId, "No response received from the model. Please try again.")
+        }
+    }
+
+    private fun updateMessage(id: String, content: String, streaming: Boolean? = null) {
+        val idx = messages.indexOfFirst { it.id == id }
+        if (idx >= 0) {
+            messages[idx] = if (streaming != null) {
+                messages[idx].copy(content = content, isStreaming = streaming)
+            } else {
+                messages[idx].copy(content = content)
             }
         }
     }
