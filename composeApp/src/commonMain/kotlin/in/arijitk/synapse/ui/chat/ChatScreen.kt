@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -38,6 +39,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import org.jetbrains.compose.resources.painterResource
+import synapse.composeapp.generated.resources.Res
+import synapse.composeapp.generated.resources.app_icon
 
 /**
  * Main Chat screen composable.
@@ -149,10 +153,12 @@ internal fun ModelSelectorChip(
                         color = cs.onSurfaceVariant,
                     )
                 } else {
-                    Icon(
-                        Icons.Outlined.SmartToy,
+                    Image(
+                        painter = painterResource(Res.drawable.app_icon),
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape),
                     )
                 }
                 Text(
@@ -280,15 +286,15 @@ private fun EmptyState(modelName: String?) {
             Box(
                 modifier = Modifier
                     .size(72.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
+                    .clip(CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    Icons.Outlined.SmartToy,
+                Image(
+                    painter = painterResource(Res.drawable.app_icon),
                     contentDescription = null,
-                    modifier = Modifier.size(36.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape),
                 )
             }
             Text(
@@ -341,11 +347,12 @@ private fun MessageBubble(message: ChatMessage) {
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
             if (!isUser) {
-                Icon(
-                    Icons.Outlined.SmartToy,
+                Image(
+                    painter = painterResource(Res.drawable.app_icon),
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = cs.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(CircleShape),
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
