@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
+import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
@@ -412,71 +414,36 @@ private fun MessageBubble(message: ChatMessage) {
                             color = contentColor,
                         )
                     } else {
-                        // Full markdown rendering for completed assistant messages
-                        Markdown(
-                            content = message.content,
-                            components = markdownComponents(
-                                codeFence = { model ->
-                                    val lang = model.node
-                                        .findChildOfType(MarkdownTokenTypes.FENCE_LANG)
-                                        ?.getTextInNode(model.content)
-                                        ?.toString()
-                                        ?.trim()
-                                    if (lang.equals("mermaid", ignoreCase = true)) {
-                                        // Extract code from the fence node
-                                        val children = model.node.children
-                                        if (children.size >= 3) {
-                                            val start = children[2].startOffset
-                                            val end = children[(children.size - 2).coerceAtLeast(2)].endOffset
-                                            val mermaidCode = model.content
-                                                .subSequence(start, end)
-                                                .toString()
-                                                .trim()
-                                            MermaidDiagram(mermaidCode)
-                                        }
-                                    } else {
-                                        MarkdownCodeFence(
-                                            model.content,
-                                            model.node,
+                        // Full markdown rendering for completed assistant messages.
+                        // If the content contains LaTeX math, split it into
+                        // segments and render math via MathBlock.
+                        val segments = remember(message.content) {
+                            if (containsMath(message.content)) {
+                                parseContentSegments(message.content)
+                            } else {
+                                listOf(ContentSegment.Text(message.content))
+                            }
+                        }
+
+                        segments.forEach { segment ->
+                            when (segment) {
+                                is ContentSegment.Math -> {
+                                    MathBlock(
+                                        latex = segment.latex,
+                                        displayMode = segment.displayMode,
+                                        textColor = contentColor,
+                                    )
+                                }
+                                is ContentSegment.Text -> {
+                                    if (segment.markdown.isNotBlank()) {
+                                        AssistantMarkdown(
+                                            content = segment.markdown,
+                                            contentColor = contentColor,
                                         )
                                     }
-                                },
-                            ),
-                            colors = markdownColor(
-                                text = contentColor,
-                                codeText = contentColor,
-                                inlineCodeText = contentColor,
-                                linkText = MaterialTheme.colorScheme.primary,
-                                codeBackground = contentColor.copy(alpha = 0.08f),
-                                inlineCodeBackground = contentColor.copy(alpha = 0.08f),
-                                dividerColor = contentColor.copy(alpha = 0.2f),
-                            ),
-                            typography = markdownTypography(
-                                h1 = MaterialTheme.typography.titleLarge.copy(color = contentColor),
-                                h2 = MaterialTheme.typography.titleMedium.copy(color = contentColor),
-                                h3 = MaterialTheme.typography.titleSmall.copy(color = contentColor),
-                                h4 = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = contentColor,
-                                ),
-                                h5 = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = contentColor,
-                                ),
-                                h6 = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = contentColor,
-                                ),
-                                paragraph = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
-                                quote = MaterialTheme.typography.bodyMedium.copy(
-                                    color = contentColor.copy(alpha = 0.7f),
-                                ),
-                                code = MaterialTheme.typography.bodySmall.copy(color = contentColor),
-                                list = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
-                                ordered = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
-                                bullet = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
-                            ),
-                        )
+                                }
+                            }
+                        }
                     }
                 } else if (!message.isStreaming) {
                     // Fallback for empty non-streaming messages — prevents
@@ -496,6 +463,88 @@ private fun MessageBubble(message: ChatMessage) {
             }
         }
     }
+}
+
+// ── Assistant Markdown Renderer ─────────────────────────────────────────────
+
+/**
+ * Renders a markdown text segment for assistant messages with syntax highlighting,
+ * mermaid diagram support, and themed styling.
+ */
+@Composable
+private fun AssistantMarkdown(
+    content: String,
+    contentColor: androidx.compose.ui.graphics.Color,
+) {
+    Markdown(
+        content = content,
+        components = markdownComponents(
+            codeFence = { model ->
+                val lang = model.node
+                    .findChildOfType(MarkdownTokenTypes.FENCE_LANG)
+                    ?.getTextInNode(model.content)
+                    ?.toString()
+                    ?.trim()
+                if (lang.equals("mermaid", ignoreCase = true)) {
+                    val children = model.node.children
+                    if (children.size >= 3) {
+                        val start = children[2].startOffset
+                        val end = children[(children.size - 2).coerceAtLeast(2)].endOffset
+                        val mermaidCode = model.content
+                            .subSequence(start, end)
+                            .toString()
+                            .trim()
+                        MermaidDiagram(mermaidCode)
+                    }
+                } else {
+                    MarkdownHighlightedCodeFence(
+                        content = model.content,
+                        node = model.node,
+                    )
+                }
+            },
+            codeBlock = {
+                MarkdownHighlightedCodeBlock(
+                    content = it.content,
+                    node = it.node,
+                )
+            },
+        ),
+        colors = markdownColor(
+            text = contentColor,
+            codeText = contentColor,
+            inlineCodeText = contentColor,
+            linkText = MaterialTheme.colorScheme.primary,
+            codeBackground = contentColor.copy(alpha = 0.08f),
+            inlineCodeBackground = contentColor.copy(alpha = 0.08f),
+            dividerColor = contentColor.copy(alpha = 0.2f),
+        ),
+        typography = markdownTypography(
+            h1 = MaterialTheme.typography.titleLarge.copy(color = contentColor),
+            h2 = MaterialTheme.typography.titleMedium.copy(color = contentColor),
+            h3 = MaterialTheme.typography.titleSmall.copy(color = contentColor),
+            h4 = MaterialTheme.typography.bodyLarge.copy(
+                fontWeight = FontWeight.Bold,
+                color = contentColor,
+            ),
+            h5 = MaterialTheme.typography.bodyLarge.copy(
+                fontWeight = FontWeight.Bold,
+                color = contentColor,
+            ),
+            h6 = MaterialTheme.typography.bodyLarge.copy(
+                fontWeight = FontWeight.Bold,
+                color = contentColor,
+            ),
+            paragraph = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+            quote = MaterialTheme.typography.bodyMedium.copy(
+                color = contentColor.copy(alpha = 0.7f),
+            ),
+            code = MaterialTheme.typography.bodySmall.copy(color = contentColor),
+            list = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+            ordered = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+            bullet = MaterialTheme.typography.bodyMedium.copy(color = contentColor),
+        ),
+    )
 }
 
 // ── Attachment Chip (inside message) ────────────────────────────────────────
