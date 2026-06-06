@@ -36,9 +36,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import org.intellij.markdown.MarkdownTokenTypes
+import org.intellij.markdown.ast.findChildOfType
+import org.intellij.markdown.ast.getTextInNode
 import org.jetbrains.compose.resources.painterResource
 import synapse.composeapp.generated.resources.Res
 import synapse.composeapp.generated.resources.app_icon
@@ -410,6 +415,33 @@ private fun MessageBubble(message: ChatMessage) {
                         // Full markdown rendering for completed assistant messages
                         Markdown(
                             content = message.content,
+                            components = markdownComponents(
+                                codeFence = { model ->
+                                    val lang = model.node
+                                        .findChildOfType(MarkdownTokenTypes.FENCE_LANG)
+                                        ?.getTextInNode(model.content)
+                                        ?.toString()
+                                        ?.trim()
+                                    if (lang.equals("mermaid", ignoreCase = true)) {
+                                        // Extract code from the fence node
+                                        val children = model.node.children
+                                        if (children.size >= 3) {
+                                            val start = children[2].startOffset
+                                            val end = children[(children.size - 2).coerceAtLeast(2)].endOffset
+                                            val mermaidCode = model.content
+                                                .subSequence(start, end)
+                                                .toString()
+                                                .trim()
+                                            MermaidDiagram(mermaidCode)
+                                        }
+                                    } else {
+                                        MarkdownCodeFence(
+                                            model.content,
+                                            model.node,
+                                        )
+                                    }
+                                },
+                            ),
                             colors = markdownColor(
                                 text = contentColor,
                                 codeText = contentColor,

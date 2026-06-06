@@ -15,6 +15,39 @@
             overflow: hidden;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script>
+        // Initialize mermaid (no auto-start; we render on demand)
+        mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+        // Render mermaid code to a PNG data-URL.
+        // Returns a Promise<string> with "data:image/png;base64,..."
+        window.__synapseMermaidRender = async function(id, code) {
+            // Render to SVG string
+            var result = await mermaid.render(id, code);
+            var svgText = result.svg;
+
+            // Convert SVG to PNG via an offscreen canvas
+            return new Promise(function(resolve, reject) {
+                var img = new Image();
+                img.onload = function() {
+                    var scale = 2; // 2x for crisp rendering
+                    var canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth * scale;
+                    canvas.height = img.naturalHeight * scale;
+                    var ctx = canvas.getContext('2d');
+                    ctx.scale(scale, scale);
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/png'));
+                };
+                img.onerror = function() {
+                    reject(new Error('Failed to render SVG to canvas'));
+                };
+                var blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+                img.src = URL.createObjectURL(blob);
+            });
+        };
+    </script>
     <script src="skiko.js"></script>
     <script src="synapse.js"></script>
 </head>
