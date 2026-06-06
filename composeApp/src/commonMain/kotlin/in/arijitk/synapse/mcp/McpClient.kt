@@ -65,6 +65,7 @@ class McpClient {
 
     /**
      * Call a tool on an MCP server.
+     * Re-initializes the session before the call (MCP requires init first).
      */
     suspend fun callTool(
         server: McpServerConfig,
@@ -76,6 +77,18 @@ class McpClient {
                 McpTransportType.HTTP_STREAMABLE -> server.url
                 McpTransportType.SSE -> discoverSsePostEndpoint(server.url)
             }
+
+            // MCP requires initialize before any tool call
+            val initResult = sendJsonRpc(postUrl, "initialize", buildJsonObject {
+                put("protocolVersion", "2025-03-26")
+                putJsonObject("capabilities") {}
+                putJsonObject("clientInfo") {
+                    put("name", "Synapse")
+                    put("version", "1.0.0")
+                }
+            })
+            if (initResult.isFailure) return Result.failure(initResult.exceptionOrNull()!!)
+            sendNotification(postUrl, "notifications/initialized")
 
             val result = sendJsonRpc(postUrl, "tools/call", buildJsonObject {
                 put("name", toolName)

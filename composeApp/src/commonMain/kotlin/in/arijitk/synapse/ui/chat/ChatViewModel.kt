@@ -176,7 +176,45 @@ class ChatViewModel : ViewModel() {
         pendingAttachments.clear()
         inputText = ""
 
+        // Re-discover MCP tools in case servers were added/removed in settings
+        val servers = SettingsRepository.instance.mcpServers
+        if (servers.size != mcpTools.map { it.serverName }.distinct().size ||
+            servers.any { s -> mcpTools.none { it.serverName == s.name } }
+        ) {
+            // Servers changed — refresh synchronously before generating
+            viewModelScope.launch {
+                refreshMcpToolsSync()
+                generateResponse()
+            }
+            return
+        }
+
         generateResponse()
+    }
+
+    /**
+     * Synchronous version of MCP tool refresh (suspending, not fire-and-forget).
+     */
+    private suspend fun refreshMcpToolsSync() {
+        val servers = SettingsRepository.instance.mcpServers
+        if (servers.isEmpty()) {
+            mcpTools.clear()
+            return
+        }
+
+        isLoadingMcpTools = true
+        val allTools = mutableListOf<McpServerTool>()
+        for (server in servers) {
+            mcpClient.discoverTools(server)
+                .onSuccess { tools ->
+                    tools.forEach { tool ->
+                        allTools.add(McpServerTool(server.name, server, tool))
+                    }
+                }
+        }
+        mcpTools.clear()
+        mcpTools.addAll(allTools)
+        isLoadingMcpTools = false
     }
 
     private fun generateResponse() {
