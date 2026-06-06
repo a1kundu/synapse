@@ -131,6 +131,7 @@ class McpClient {
         return try {
             val response = client.post(url) {
                 contentType(ContentType.Application.Json)
+                header("Accept", "application/json, text/event-stream")
                 setBody(json.encodeToString(JsonObject.serializer(), request))
             }
 
@@ -171,6 +172,7 @@ class McpClient {
         try {
             client.post(url) {
                 contentType(ContentType.Application.Json)
+                header("Accept", "application/json, text/event-stream")
                 setBody(json.encodeToString(JsonObject.serializer(), request))
             }
         } catch (_: Exception) {
