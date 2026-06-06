@@ -134,6 +134,23 @@ data class ModelInfo(
     val ownedBy: String = "",
 )
 
+// ── GitHub Models catalog response ──────────────────────────────────────────
+
+@Serializable
+data class GitHubCatalogModel(
+    val id: String,
+    val name: String = "",
+    val publisher: String = "",
+    val summary: String = "",
+    @SerialName("rate_limit_tier")
+    val rateLimitTier: String = "",
+    val capabilities: List<String> = emptyList(),
+    @SerialName("supported_input_modalities")
+    val supportedInputModalities: List<String> = emptyList(),
+    @SerialName("supported_output_modalities")
+    val supportedOutputModalities: List<String> = emptyList(),
+)
+
 // ── Client ──────────────────────────────────────────────────────────────────
 
 /** Events emitted from a streaming chat completion with tool support. */
@@ -160,21 +177,29 @@ class LlmApiClient {
     }
 
     /**
-     * Fetch available models from the provider's /models endpoint.
+     * Fetch available models from the provider's endpoint.
+     * GitHub Models uses a different catalog API; others use the OpenAI-compatible /models endpoint.
      * Returns a list of LlmModel sorted by id.
      */
     suspend fun fetchModels(): Result<List<LlmModel>> {
         val settings = SettingsRepository.instance
         val baseUrl = settings.resolvedBaseUrl
         val apiKey = settings.llmApiKey
+        val isGitHub = settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.GITHUB_MODELS
 
         if (apiKey.isBlank()) {
             return Result.failure(Exception("API key not configured"))
         }
 
         return try {
-            val response: HttpResponse = client.get("$baseUrl/models") {
+            val modelsUrl = if (isGitHub) "$baseUrl/catalog/models" else "$baseUrl/models"
+
+            val response: HttpResponse = client.get(modelsUrl) {
                 header("Authorization", "Bearer $apiKey")
+                if (isGitHub) {
+                    header("Accept", "application/vnd.github+json")
+                    header("X-GitHub-Api-Version", "2026-03-10")
+                }
                 if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
                     header("HTTP-Referer", "https://synapse.arijitk.in")
                     header("X-Title", "Synapse")
@@ -193,28 +218,45 @@ class LlmApiClient {
             }
 
             val body = response.bodyAsText()
-            val modelsResponse = json.decodeFromString<ModelsListResponse>(body)
 
-            val models = modelsResponse.data
-                .filter { info ->
-                    // Filter to chat-capable models (skip embeddings, tts, whisper, dall-e, etc.)
-                    val id = info.id.lowercase()
-                    !id.contains("embedding") &&
-                        !id.contains("tts") &&
-                        !id.contains("whisper") &&
-                        !id.contains("dall-e") &&
-                        !id.contains("davinci") &&
-                        !id.contains("babbage") &&
-                        !id.contains("moderation")
-                }
-                .map { info ->
-                    LlmModel(
-                        id = info.id,
-                        displayName = formatModelName(info.id),
-                        provider = formatProvider(info.ownedBy),
-                    )
-                }
-                .sortedBy { it.displayName.lowercase() }
+            val models = if (isGitHub) {
+                // GitHub Models returns a plain JSON array of catalog models
+                val catalogModels = json.decodeFromString<List<GitHubCatalogModel>>(body)
+                catalogModels
+                    .filter { model ->
+                        // Only include models that support text output (chat-capable)
+                        model.supportedOutputModalities.contains("text")
+                    }
+                    .map { model ->
+                        LlmModel(
+                            id = model.id,
+                            displayName = model.name.ifBlank { formatModelName(model.id) },
+                            provider = model.publisher.ifBlank { "GitHub" },
+                        )
+                    }
+            } else {
+                // Standard OpenAI-compatible response: { data: [...] }
+                val modelsResponse = json.decodeFromString<ModelsListResponse>(body)
+                modelsResponse.data
+                    .filter { info ->
+                        // Filter to chat-capable models (skip embeddings, tts, whisper, dall-e, etc.)
+                        val id = info.id.lowercase()
+                        !id.contains("embedding") &&
+                            !id.contains("tts") &&
+                            !id.contains("whisper") &&
+                            !id.contains("dall-e") &&
+                            !id.contains("davinci") &&
+                            !id.contains("babbage") &&
+                            !id.contains("moderation")
+                    }
+                    .map { info ->
+                        LlmModel(
+                            id = info.id,
+                            displayName = formatModelName(info.id),
+                            provider = formatProvider(info.ownedBy),
+                        )
+                    }
+            }.sortedBy { it.displayName.lowercase() }
 
             Result.success(models)
         } catch (e: Exception) {
@@ -248,6 +290,34 @@ class LlmApiClient {
         }
     }
 
+    /** Resolve the chat completions endpoint URL for the current provider. */
+    private fun chatCompletionsUrl(baseUrl: String, provider: `in`.arijitk.synapse.settings.LlmProvider): String {
+        return if (provider == `in`.arijitk.synapse.settings.LlmProvider.GITHUB_MODELS) {
+            "$baseUrl/inference/chat/completions"
+        } else {
+            "$baseUrl/chat/completions"
+        }
+    }
+
+    /** Apply provider-specific headers to an HTTP request. */
+    private fun io.ktor.client.request.HttpRequestBuilder.applyProviderHeaders(
+        apiKey: String,
+        provider: `in`.arijitk.synapse.settings.LlmProvider,
+    ) {
+        header("Authorization", "Bearer $apiKey")
+        when (provider) {
+            `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER -> {
+                header("HTTP-Referer", "https://synapse.arijitk.in")
+                header("X-Title", "Synapse")
+            }
+            `in`.arijitk.synapse.settings.LlmProvider.GITHUB_MODELS -> {
+                header("Accept", "application/vnd.github+json")
+                header("X-GitHub-Api-Version", "2026-03-10")
+            }
+            else -> {}
+        }
+    }
+
     /**
      * Send a chat completion request and stream back tokens via SSE.
      * Delegates response parsing to [readSseStream] which has
@@ -267,6 +337,7 @@ class LlmApiClient {
         val settings = SettingsRepository.instance
         val baseUrl = settings.resolvedBaseUrl
         val apiKey = settings.llmApiKey
+        val provider = settings.llmProvider
 
         if (apiKey.isBlank()) {
             emit("⚠️ API key not configured. Go to Settings → LLM Provider to set your API key.")
@@ -285,13 +356,9 @@ class LlmApiClient {
             // connection open so bodyAsChannel() can stream incrementally.
             // Using client.post() would call save() internally, buffering
             // the entire body before returning — breaking token-by-token rendering.
-            client.preparePost("$baseUrl/chat/completions") {
+            client.preparePost(chatCompletionsUrl(baseUrl, provider)) {
                 contentType(ContentType.Application.Json)
-                header("Authorization", "Bearer $apiKey")
-                if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
-                    header("HTTP-Referer", "https://synapse.arijitk.in")
-                    header("X-Title", "Synapse")
-                }
+                applyProviderHeaders(apiKey, provider)
                 setBody(request)
             }.execute { response ->
                 if (!response.status.isSuccess()) {
@@ -330,6 +397,7 @@ class LlmApiClient {
         val settings = SettingsRepository.instance
         val baseUrl = settings.resolvedBaseUrl
         val apiKey = settings.llmApiKey
+        val provider = settings.llmProvider
 
         if (apiKey.isBlank()) {
             emit(StreamEvent.Error("API key not configured"))
@@ -348,13 +416,9 @@ class LlmApiClient {
         var doneEmitted = false
 
         try {
-            client.preparePost("$baseUrl/chat/completions") {
+            client.preparePost(chatCompletionsUrl(baseUrl, provider)) {
                 contentType(ContentType.Application.Json)
-                header("Authorization", "Bearer $apiKey")
-                if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
-                    header("HTTP-Referer", "https://synapse.arijitk.in")
-                    header("X-Title", "Synapse")
-                }
+                applyProviderHeaders(apiKey, provider)
                 setBody(request)
             }.execute { response ->
                 if (!response.status.isSuccess()) {
@@ -479,6 +543,7 @@ class LlmApiClient {
         val settings = SettingsRepository.instance
         val baseUrl = settings.resolvedBaseUrl
         val apiKey = settings.llmApiKey
+        val provider = settings.llmProvider
 
         if (apiKey.isBlank()) {
             return Result.failure(Exception("API key not configured"))
@@ -492,13 +557,9 @@ class LlmApiClient {
         )
 
         return try {
-            val response: HttpResponse = client.post("$baseUrl/chat/completions") {
+            val response: HttpResponse = client.post(chatCompletionsUrl(baseUrl, provider)) {
                 contentType(ContentType.Application.Json)
-                header("Authorization", "Bearer $apiKey")
-                if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
-                    header("HTTP-Referer", "https://synapse.arijitk.in")
-                    header("X-Title", "Synapse")
-                }
+                applyProviderHeaders(apiKey, provider)
                 setBody(request)
             }
 
@@ -530,6 +591,7 @@ class LlmApiClient {
         val settings = SettingsRepository.instance
         val baseUrl = settings.resolvedBaseUrl
         val apiKey = settings.llmApiKey
+        val provider = settings.llmProvider
 
         if (apiKey.isBlank()) {
             return "⚠️ API key not configured. Go to Settings → LLM Provider to set your API key."
@@ -542,13 +604,9 @@ class LlmApiClient {
         )
 
         return try {
-            val response: HttpResponse = client.post("$baseUrl/chat/completions") {
+            val response: HttpResponse = client.post(chatCompletionsUrl(baseUrl, provider)) {
                 contentType(ContentType.Application.Json)
-                header("Authorization", "Bearer $apiKey")
-                if (settings.llmProvider == `in`.arijitk.synapse.settings.LlmProvider.OPENROUTER) {
-                    header("HTTP-Referer", "https://synapse.arijitk.in")
-                    header("X-Title", "Synapse")
-                }
+                applyProviderHeaders(apiKey, provider)
                 setBody(request)
             }
 

@@ -24,7 +24,7 @@ expect class PlatformPreferences() {
 enum class LlmProvider(val displayName: String, val defaultBaseUrl: String) {
     OPENAI("OpenAI", "https://api.openai.com/v1"),
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1"),
-    GITHUB_MODELS("GitHub Models", "https://models.inference.ai.azure.com"),
+    GITHUB_MODELS("GitHub Models", "https://models.github.ai"),
 }
 
 /**
